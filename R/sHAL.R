@@ -1,6 +1,6 @@
 library(purrr)
 library(glmnet)
-library(tictoc)
+library(progress)
 
 sHAL <- R6Class("sHAL",
   public = list(
@@ -12,15 +12,18 @@ sHAL <- R6Class("sHAL",
     max_degree = NULL,
     batch_size = 50,
     n_batch = 50,
+    p = 0.1,
     alpha = NULL,
     V_folds = 5,
     n_jobs = 5,
     seed = NULL,
     basis_hash_table = NULL,
+    probs_keys = NULL,
+    probs = NULL,
 
     initialize = function(X, y, len_candidate_basis_set, len_final_basis_set,
                           max_rows, max_degree, batch_size = 50, n_batch = 50,
-                          alpha = NULL, V_folds = 5, n_jobs = 5, seed = NULL) {
+                          p = 0.1, alpha = NULL, V_folds = 5, n_jobs = 5, seed = NULL) {
       self$X <- X
       self$y <- y
       self$len_candidate_basis_set <- len_candidate_basis_set
@@ -29,11 +32,15 @@ sHAL <- R6Class("sHAL",
       self$max_degree <- max_degree
       self$batch_size <- batch_size
       self$n_batch <- n_batch
+      self$p <- p
       self$alpha <- alpha
       self$V_folds <- V_folds
       self$n_jobs <- n_jobs
       self$seed <- seed
+
       self$basis_hash_table <- new.env(hash = TRUE)
+      self$probs_keys <- NULL
+      self$probs <- NULL
     },
 
     generate_basis_set = function() {
@@ -55,6 +62,29 @@ sHAL <- R6Class("sHAL",
       })
 
       return(basis_set)
+    },
+
+    sample_basis_set = function() {
+      # sample basis keys
+      basis_keys <- sample(self$probs_keys,
+                           size = self$len_candidate_basis_set,
+                           replace = FALSE, prob = self$probs)
+      sampled_basis_set <- map(basis_keys, function(hash_key) Basis$new(hash_key))
+    },
+
+    update_weight = function(basis, loss) {
+      # get hash and compute weight of basis
+      hash_key <- basis$hash()
+      weight <- 1 / loss
+
+      if (is.null(self$basis_hash_table[[hash_key]])) {
+        # new basis, assign weight
+        self$basis_hash_table[[hash_key]] <- weight
+      } else {
+        # existing basis, update weight
+        self$basis_hash_table[[hash_key]] <-
+          self$basis_hash_table[[hash_key]] + weight
+      }
     },
 
     evaluate_candidate = function(basis_set) {
@@ -91,18 +121,7 @@ sHAL <- R6Class("sHAL",
       non_zero_basis <- basis_set[non_zero_indices]
 
       for (basis in non_zero_basis) {
-        # hash and compute weight of basis
-        hash_key <- basis$hash()
-        weight <- 1 / loss
-
-        if (is.null(self$basis_hash_table[[hash_key]])) {
-          # new basis, assign weight
-          self$basis_hash_table[[hash_key]] <- weight
-        } else {
-          # existing basis, update weight
-          self$basis_hash_table[[hash_key]] <-
-            self$basis_hash_table[[hash_key]] + weight
-        }
+        self$update_weight(basis, loss)
       }
     },
 
@@ -127,30 +146,35 @@ sHAL <- R6Class("sHAL",
     run = function(verbose = FALSE, plot = FALSE) {
       dict_length <- vector()
 
+      pb <- progress_bar$new(format = "[:bar] Batch: :current of :total, time elapsed: :elapsedfull",
+                             total = self$n_batch)
+
       for (i in seq_len(self$n_batch)) {
-        tic()
         dict_length <- c(dict_length, length(self$basis_hash_table))
 
         if (verbose) {
-          message(paste("Batch", i, "/", self$n_batch,
-                        ", Dictionary length: ", length(self$basis_hash_table)))
+          pb$tick()
         }
 
-        # generate a batch of candidate basis sets
-        basis_sets <- map(seq_len(self$batch_size),
-                          function(x) self$generate_basis_set())
+        # generate random candidate basis sets
+        n_random <- ifelse(is.null(self$probs),
+                           self$batch_size,
+                           round(self$batch_size * self$p))
+        random_basis_sets <- map(seq_len(n_random),
+                                 function(x) self$generate_basis_set())
+
+        # generate candidate basis sets from sampling distribution
+        n_sampling <- self$batch_size - n_random
+        sampled_basis_sets <- map(seq_len(n_sampling),
+                                  function(x) self$sample_basis_set())
 
         # fit CV Lasso on each basis set
-        walk(basis_sets, self$evaluate_candidate)
+        walk(c(random_basis_sets, sampled_basis_sets), self$evaluate_candidate)
 
-        toc()
-
-        # normalize weights in dictionary after each batch
-        #total_weight <- sum(unlist(eget(self$basis_hash_table)))
-        #for (key in names(self$basis_hash_table)) {
-        #  assign(key, get(key, envir = self$basis_hash_table) / total_weight,
-        #         envir = self$basis_hash_table)
-        #}
+        # update basis keys and their sampling distribution
+        self$probs_keys <- names(self$basis_hash_table)
+        weights <- unlist(mget(self$probs_keys, envir = self$basis_hash_table))
+        self$probs <- weights / sum(weights)
       }
 
       sampled_basis_set <- self$get_top_k(self$len_final_basis_set)
