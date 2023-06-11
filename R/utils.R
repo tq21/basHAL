@@ -9,10 +9,92 @@ count_basis <- function(basis_set) {
   return(res)
 }
 
-basis_1 <- Basis$new(c(1,2), c(10,20))
-basis_2 <- Basis$new(c(1,4,6), c(30,20,10))
-basis_3 <- Basis$new(c(2,5,9,10), c(10,20,10,43))
+# basis_1 <- Basis$new(c(1,2), c(10,20))
+# basis_2 <- Basis$new(c(1,4,6), c(30,20,10))
+# basis_3 <- Basis$new(c(2,5,9,10), c(10,20,10,43))
+#
+# basis_set <- list(basis_1, basis_2, basis_3)
+#
+# count_basis(basis_set)
 
-basis_set <- list(basis_1, basis_2, basis_3)
+library(hal9001)
 
-count_basis(basis_set)
+`%+%` <- function(a, b) paste0(a, b)
+
+run_benchmark <- function(fpath, V, y_col_idx,
+                          len_candidate_basis_set,
+                          len_final_basis_set,
+                          max_rows,
+                          max_degree,
+                          batch_size,
+                          n_batch,
+                          p,
+                          seed,
+                          weight_function) {
+  # load data
+  dt <- read.csv(fpath)
+
+  # make folds
+  folds <- sample(rep(1:V, length.out = nrow(dt)))
+
+  hal9001_rmse <- rep(NA, V)
+  hal9001_num_non_zero <- rep(NA, V)
+  sHAL_rmse <- rep(NA, V)
+  sHAL_num_non_zero <- rep(NA, V)
+
+  x_col_idx <- setdiff(seq_len(ncol(dt)), y_col_idx)
+
+  for (v in 1:V) {
+    # train-validation split
+    dt_train <- dt[folds != v,]
+    dt_valid <- dt[folds == v,]
+
+    # run hal9001 --------------------------------------------------------------
+    print("running hal9001...")
+    hal9001_fit <- fit_hal(X = dt_train[, x_col_idx],
+                           Y = dt_train[, y_col_idx],
+                           family = "gaussian",
+                           max_degree = max_degree,
+                           smoothness_orders = 0)
+
+    # get rmse
+    hal9001_pred <- predict(hal9001_fit,
+                            new_data = dt_valid[, x_col_idx])
+    hal9001_true <- dt_valid[, y_col_idx]
+    hal9001_rmse[v] <- sqrt(mean((hal9001_pred - hal9001_true)^2))
+
+    # get number of non zero coefficients
+    hal9001_num_non_zero[v] <- length(summary(hal9001_fit)$table$coef) - 1 # exclude intercept
+
+    # run sHAL -----------------------------------------------------------------
+    print("running sHAL...")
+    sHAL_obj <- sHAL$new(X = dt_train[, x_col_idx],
+                         y = dt_train[, y_col_idx],
+                         len_candidate_basis_set = len_candidate_basis_set,
+                         len_final_basis_set = len_final_basis_set,
+                         max_rows = max_rows,
+                         max_degree = max_degree,
+                         batch_size = batch_size,
+                         n_batch = n_batch,
+                         p = p,
+                         seed = seed,
+                         weight_function = weight_function)
+    sHAL_res <- sHAL_obj$run(verbose = TRUE, plot = FALSE)
+    sHAL_lasso <- sHAL_res[[1]]
+    sHAL_basis_set <- sHAL_res[[2]]
+
+    # get rmse
+    basis_matrix_valid <- make_design_matrix(sHAL_basis_set, dt_valid[, x_col_idx])
+    sHAL_pred <- predict(sHAL_lasso, newx = basis_matrix_valid)
+    sHAL_true <- dt_valid[, y_col_idx]
+    sHAL_rmse[v] <- sqrt(mean((sHAL_pred - sHAL_true)^2))
+
+    # get number of non zero coefficients
+    sHAL_num_non_zero[v] <- sum(coef(sHAL_lasso) != 0)
+  }
+
+  return(list(hal9001_rmse,
+              hal9001_num_non_zero,
+              sHAL_rmse,
+              sHAL_num_non_zero))
+}

@@ -17,13 +17,15 @@ sHAL <- R6Class("sHAL",
     V_folds = 5,
     n_jobs = 5,
     seed = NULL,
+    weight_function = "inverse loss",
     basis_hash_table = NULL,
     probs_keys = NULL,
     probs = NULL,
 
     initialize = function(X, y, len_candidate_basis_set, len_final_basis_set,
                           max_rows, max_degree, batch_size = 50, n_batch = 50,
-                          p = 0.1, alpha = NULL, V_folds = 5, n_jobs = 5, seed = NULL) {
+                          p = 0.1, alpha = NULL, V_folds = 5, n_jobs = 5, seed = NULL,
+                          weight_function = "inverse loss") {
       self$X <- X
       self$y <- y
       self$len_candidate_basis_set <- len_candidate_basis_set
@@ -37,6 +39,7 @@ sHAL <- R6Class("sHAL",
       self$V_folds <- V_folds
       self$n_jobs <- n_jobs
       self$seed <- seed
+      self$weight_function <- weight_function
 
       self$basis_hash_table <- new.env(hash = TRUE)
       self$probs_keys <- NULL
@@ -72,10 +75,9 @@ sHAL <- R6Class("sHAL",
       sampled_basis_set <- map(basis_keys, function(hash_key) Basis$new(hash_key))
     },
 
-    update_weight = function(basis, loss) {
-      # get hash and compute weight of basis
+    update_weight = function(basis, weight) {
+      # get hash key
       hash_key <- basis$hash()
-      weight <- 1 / loss
 
       if (is.null(self$basis_hash_table[[hash_key]])) {
         # new basis, assign weight
@@ -121,6 +123,28 @@ sHAL <- R6Class("sHAL",
       non_zero_basis <- basis_set[non_zero_indices]
 
       for (basis in non_zero_basis) {
+        # calculate weight using the specified weight function
+        weight <- NULL
+        if (self$weight_function == "inverse loss") {
+          weight <- inverse_loss_weight(loss)
+        } else if (self$weight_function == "double weight") {
+          weight <- double_weight(length(non_zero_basis),
+                                  self$len_candidate_basis_set,
+                                  loss,
+                                  sqrt(mean((y_valid - mean(y_valid))^2)))
+        } else if (self$weight_function == "double weight v2") {
+          weight <- double_weight_v2(length(non_zero_basis),
+                                     self$len_candidate_basis_set,
+                                     loss,
+                                     sqrt(mean((y_valid - mean(y_valid))^2)))
+        } else if (self$weight_function == "double weight v3") {
+          weight <- double_weight_v3(length(non_zero_basis),
+                                     self$len_candidate_basis_set,
+                                     loss,
+                                     sqrt(mean((y_valid - mean(y_valid))^2)))
+        }
+
+        # update basis weight
         self$update_weight(basis, loss)
       }
     },
@@ -155,6 +179,7 @@ sHAL <- R6Class("sHAL",
         if (verbose) {
           pb$tick()
         }
+        print(i)
 
         # generate random candidate basis sets
         n_random <- ifelse(is.null(self$probs),
@@ -174,6 +199,9 @@ sHAL <- R6Class("sHAL",
         # update basis keys and their sampling distribution
         self$probs_keys <- names(self$basis_hash_table)
         weights <- unlist(mget(self$probs_keys, envir = self$basis_hash_table))
+
+        # normalize weight to 0-1
+        weights <- (weights - min(weights)) / (max(weights) - min(weights))
         self$probs <- weights / sum(weights)
       }
 

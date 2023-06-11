@@ -8,7 +8,7 @@ print(paste("Data dimension: ", dim(data)))
 X <- as.matrix(data[, 1:(ncol(data)-1)])
 y <- as.matrix(data[, ncol(data)])
 
-set.seed(123)
+set.seed(9847)
 
 # train-test split
 indices <- sample(seq_len(nrow(X)), size = 0.1 * nrow(X))
@@ -24,10 +24,11 @@ sHAL_obj <- sHAL$new(X = X_train,
                      len_final_basis_set = nrow(X_train),
                      max_rows = nrow(X_train),
                      max_degree = 7,
-                     batch_size = 100,
+                     batch_size = 50,
                      n_batch = 50,
-                     p = 0.1,
-                     seed = 29857)
+                     p = 0.5,
+                     seed = 29857,
+                     weight_function = "double weight")
 
 # run S-HAL
 result <- sHAL_obj$run(verbose = TRUE, plot = TRUE)
