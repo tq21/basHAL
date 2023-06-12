@@ -21,11 +21,12 @@ sHAL <- R6Class("sHAL",
     basis_hash_table = NULL,
     probs_keys = NULL,
     probs = NULL,
+    family = "gaussian",
 
     initialize = function(X, y, len_candidate_basis_set, len_final_basis_set,
                           max_rows, max_degree, batch_size = 50, n_batch = 50,
                           p = 0.1, alpha = NULL, V_folds = 5, n_jobs = 5, seed = NULL,
-                          weight_function = "inverse loss") {
+                          weight_function = "inverse loss", family = "gaussian") {
       self$X <- X
       self$y <- y
       self$len_candidate_basis_set <- len_candidate_basis_set
@@ -44,6 +45,7 @@ sHAL <- R6Class("sHAL",
       self$basis_hash_table <- new.env(hash = TRUE)
       self$probs_keys <- NULL
       self$probs <- NULL
+      self$family <- family
     },
 
     generate_basis_set = function() {
@@ -90,37 +92,40 @@ sHAL <- R6Class("sHAL",
     },
 
     evaluate_candidate = function(basis_set) {
-      X_train <- NULL
-      X_valid <- NULL
-      y_train <- NULL
-      y_valid <- NULL
-
+      # either fit on full data or sampled data
+      row_indices <- NULL
       if (self$max_rows >= nrow(self$X)) {
-        basis_matrix <- make_design_matrix(basis_set, self$X)
-        train_indices <- sample(x = 1:nrow(basis_matrix),
-                                size = floor(0.8 * nrow(basis_matrix)))
-        X_train <- basis_matrix[train_indices,]
-        X_valid <- basis_matrix[-train_indices,]
-        y_train <- self$y[train_indices]
-        y_valid <- self$y[-train_indices]
+        row_indices <- seq_len(nrow(self$X))
       } else {
         row_indices <- sample(x = 1:nrow(self$X), size = self$max_rows)
-        basis_matrix <- make_design_matrix(basis_set, self$X[row_indices, ])
-        train_indices <- sample(x = 1:nrow(basis_matrix),
-                                size = floor(0.8 * nrow(basis_matrix)))
-        X_train <- basis_matrix[train_indices, ]
-        X_valid <- basis_matrix[-train_indices, ]
-        y_train <- self$y[row_indices][train_indices]
-        y_valid <- self$y[row_indices][-train_indices]
       }
 
-      lasso <- cv.glmnet(X_train, y_train, alpha = 1, nfold = self$V_folds)
-      preds <- predict(lasso, newx = X_valid, s = lasso$lambda.min)
-      loss <- sqrt(mean((y_valid - preds)^2))
+      # make design matrix
+      basis_matrix <- make_design_matrix(basis_set, self$X[row_indices, ])
 
+      # train-validation split
+      train_indices <- sample(x = 1:nrow(basis_matrix),
+                              size = floor(0.8 * nrow(basis_matrix)))
+      X_train <- basis_matrix[train_indices, ]
+      X_valid <- basis_matrix[-train_indices, ]
+      y_train <- self$y[row_indices][train_indices]
+      y_valid <- self$y[row_indices][-train_indices]
+
+      # fit CV lasso on training set, evaluate loss on validation set
+      lasso <- cv.glmnet(X_train, y_train, alpha = 1, nfold = self$V_folds, family = self$family)
+      preds <- predict(lasso, newx = X_valid, s = lasso$lambda.min, type = "response")
+      loss <- ifelse(self$family == "gaussian",
+                     sqrt(mean((y_valid - preds)^2)),
+                     -mean(y_valid * log(preds) + (1 - y_valid) * log(1 - preds)))
+
+      # get basis with non-zero coefficients
       coef <- coef(lasso, s = lasso$lambda.min)[-1]
-      non_zero_indices <- which(coef != 0)
-      non_zero_basis <- basis_set[non_zero_indices]
+      non_zero_basis <- basis_set[which(coef != 0)]
+
+      # null loss
+      null_loss <- ifelse(self$family == "gaussian",
+                          sqrt(mean((y_valid - mean(y_valid))^2)),
+                          -mean(y_valid * log(mean(y_valid)) + (1 - y_valid) * log(1 - mean(y_valid))))
 
       for (basis in non_zero_basis) {
         # calculate weight using the specified weight function
@@ -131,17 +136,17 @@ sHAL <- R6Class("sHAL",
           weight <- double_weight(length(non_zero_basis),
                                   self$len_candidate_basis_set,
                                   loss,
-                                  sqrt(mean((y_valid - mean(y_valid))^2)))
+                                  null_loss)
         } else if (self$weight_function == "double weight v2") {
           weight <- double_weight_v2(length(non_zero_basis),
                                      self$len_candidate_basis_set,
                                      loss,
-                                     sqrt(mean((y_valid - mean(y_valid))^2)))
+                                     null_loss)
         } else if (self$weight_function == "double weight v3") {
           weight <- double_weight_v3(length(non_zero_basis),
                                      self$len_candidate_basis_set,
                                      loss,
-                                     sqrt(mean((y_valid - mean(y_valid))^2)))
+                                     null_loss)
         }
 
         # update basis weight
@@ -179,7 +184,7 @@ sHAL <- R6Class("sHAL",
         if (verbose) {
           pb$tick()
         }
-        print(i)
+        #print(i)
 
         # generate random candidate basis sets
         n_random <- ifelse(is.null(self$probs),

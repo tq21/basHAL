@@ -18,6 +18,7 @@ count_basis <- function(basis_set) {
 # count_basis(basis_set)
 
 library(hal9001)
+library(tidyverse)
 
 `%+%` <- function(a, b) paste0(a, b)
 
@@ -30,16 +31,18 @@ run_benchmark <- function(fpath, V, y_col_idx,
                           n_batch,
                           p,
                           seed,
-                          weight_function) {
+                          weight_function,
+                          family = "gaussian") {
   # load data
   dt <- read.csv(fpath)
+  dt <- drop_na(dt)
 
   # make folds
   folds <- sample(rep(1:V, length.out = nrow(dt)))
 
-  hal9001_rmse <- rep(NA, V)
+  hal9001_loss <- rep(NA, V)
   hal9001_num_non_zero <- rep(NA, V)
-  sHAL_rmse <- rep(NA, V)
+  sHAL_loss <- rep(NA, V)
   sHAL_num_non_zero <- rep(NA, V)
 
   x_col_idx <- setdiff(seq_len(ncol(dt)), y_col_idx)
@@ -53,15 +56,17 @@ run_benchmark <- function(fpath, V, y_col_idx,
     print("running hal9001...")
     hal9001_fit <- fit_hal(X = dt_train[, x_col_idx],
                            Y = dt_train[, y_col_idx],
-                           family = "gaussian",
+                           family = family,
                            max_degree = max_degree,
                            smoothness_orders = 0)
 
-    # get rmse
+    # get loss
     hal9001_pred <- predict(hal9001_fit,
-                            new_data = dt_valid[, x_col_idx])
+                            new_data = dt_valid[, x_col_idx], type = "response")
     hal9001_true <- dt_valid[, y_col_idx]
-    hal9001_rmse[v] <- sqrt(mean((hal9001_pred - hal9001_true)^2))
+    hal9001_loss[v] <- ifelse(family == "gaussian",
+                              sqrt(mean((hal9001_pred - hal9001_true)^2)),
+                              -mean(hal9001_true * log(hal9001_pred) + (1 - hal9001_true) * log(1 - hal9001_pred)))
 
     # get number of non zero coefficients
     hal9001_num_non_zero[v] <- length(summary(hal9001_fit)$table$coef) - 1 # exclude intercept
@@ -78,23 +83,26 @@ run_benchmark <- function(fpath, V, y_col_idx,
                          n_batch = n_batch,
                          p = p,
                          seed = seed,
-                         weight_function = weight_function)
+                         weight_function = weight_function,
+                         family = family)
     sHAL_res <- sHAL_obj$run(verbose = TRUE, plot = FALSE)
     sHAL_lasso <- sHAL_res[[1]]
     sHAL_basis_set <- sHAL_res[[2]]
 
     # get rmse
     basis_matrix_valid <- make_design_matrix(sHAL_basis_set, dt_valid[, x_col_idx])
-    sHAL_pred <- predict(sHAL_lasso, newx = basis_matrix_valid)
+    sHAL_pred <- predict(sHAL_lasso, newx = basis_matrix_valid, type = "response")
     sHAL_true <- dt_valid[, y_col_idx]
-    sHAL_rmse[v] <- sqrt(mean((sHAL_pred - sHAL_true)^2))
+    sHAL_loss[v] <- ifelse(family == "gaussian",
+                           sqrt(mean((sHAL_pred - sHAL_true)^2)),
+                           -mean(sHAL_true * log(sHAL_pred) + (1 - sHAL_true) * log(1 - sHAL_pred)))
 
     # get number of non zero coefficients
     sHAL_num_non_zero[v] <- sum(coef(sHAL_lasso) != 0)
   }
 
-  return(list(hal9001_rmse,
+  return(list(hal9001_loss,
               hal9001_num_non_zero,
-              sHAL_rmse,
+              sHAL_loss,
               sHAL_num_non_zero))
 }
