@@ -1,12 +1,16 @@
 library(testthat)
+library(devtools)
+library(tidyverse)
+load_all()
 
 # load data
-data <- read.csv("data/boston.csv")
+data <- read.csv("data/small_data/laheart.csv")
+data <- drop_na(data)
 print(paste("Data dimension: ", dim(data)))
 
 # get X and y
-X <- as.matrix(data[, 1:(ncol(data)-1)])
-y <- as.matrix(data[, ncol(data)])
+X <- as.matrix(data[, 2:ncol(data)])
+y <- as.matrix(data[, 1])
 
 set.seed(9847)
 
@@ -23,12 +27,13 @@ sHAL_obj <- sHAL$new(X = X_train,
                      len_candidate_basis_set = nrow(X_train),
                      len_final_basis_set = nrow(X_train),
                      max_rows = nrow(X_train),
-                     max_degree = 7,
+                     max_degree = 11,
                      batch_size = 50,
                      n_batch = 50,
                      p = 0.5,
                      seed = 29857,
-                     weight_function = "double weight")
+                     weight_function = "double weight",
+                     family = "binomial")
 
 # run S-HAL
 result <- sHAL_obj$run(verbose = TRUE, plot = TRUE)
