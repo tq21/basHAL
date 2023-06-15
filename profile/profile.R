@@ -31,6 +31,7 @@ example_run <- function(fpath,
                        weight_function = weight_function,
                        family = family)
   sHAL_res <- sHAL_obj$run(verbose = TRUE, plot = FALSE)
+  return(sHAL_obj)
 }
 
 profvis({
@@ -53,14 +54,14 @@ cpu_double_weight_v3 <- example_run(fpath = "data/small_data/cpu.csv",
                                     len_final_basis_set = 209,
                                     max_rows = 209,
                                     max_degree = 6,
-                                    batch_size = 20,
-                                    n_batch = 50,
+                                    batch_size = 50,
+                                    n_batch = 500,
                                     p = 0.5,
                                     seed = 12941,
                                     weight_function = "double weight v3")
 
 
-
+plot(cpu_double_weight_v3$avg_loss)
 
 
 
@@ -72,13 +73,13 @@ len_candidate_basis_set = 209
 len_final_basis_set = 209
 max_rows = 209
 max_degree = 6
-batch_size = 20
+batch_size = 100
 n_batch = 50
 p = 0.5
 seed = 12941
 weight_function = "double weight v3"
 V_folds <- 10
-n_jobs <- 5
+n_cores <- 5
 
 self <- list()
 self$X <- X
@@ -92,7 +93,7 @@ self$n_batch <- n_batch
 self$p <- p
 self$alpha <- alpha
 self$V_folds <- V_folds
-self$n_jobs <- n_jobs
+self$n_cores <- n_cores
 self$seed <- seed
 self$weight_function <- weight_function
 
@@ -100,7 +101,7 @@ self$basis_hash_table <- new.env(hash = TRUE)
 self$probs_keys <- NULL
 self$probs <- NULL
 self$family <- "gaussian"
-
+self$avg_loss <- NULL
 
 self$generate_basis_set <- generate_basis_set
 self$evaluate_candidate <- evaluate_candidate

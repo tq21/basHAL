@@ -1,6 +1,6 @@
 #!/bin/bash
 # Job name:
-#SBATCH --job-name=oecdpanel_double_weight_v3
+#SBATCH --job-name=job_1
 #
 # Partition:
 #SBATCH --partition=low
@@ -19,4 +19,4 @@
 # Mail user:
 #SBATCH --mail-user=sky.qiu@berkeley.edu
 
-R CMD BATCH --no-save ../oecdpanel_double_weight_v3.R logs/oecdpanel_double_weight_v3.Rout
+R CMD BATCH --no-save 5_var_n_500_inverse_loss.R 5_var_n_500_inverse_loss.Rout

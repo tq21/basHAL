@@ -16,18 +16,23 @@ sHAL <- R6Class("sHAL",
     p = 0.1,
     alpha = NULL,
     V_folds = 5,
-    n_cores = 5,
+    n_cores = 1,
     seed = NULL,
     weight_function = "inverse loss",
     basis_hash_table = NULL,
     probs_keys = NULL,
     probs = NULL,
     family = "gaussian",
+    best_loss = Inf,
+    best_basis_set = NULL,
+    best_loss_batch = NULL,
+    best_loss_traj = NULL,
 
     initialize = function(X, y, len_candidate_basis_set, len_final_basis_set,
                           max_rows, max_degree, batch_size = 50, n_batch = 50,
-                          p = 0.1, alpha = NULL, V_folds = 5, n_cores = 5, seed = NULL,
-                          weight_function = "inverse loss", family = "gaussian") {
+                          p = 0.1, alpha = NULL, V_folds = 5, n_cores = 1, seed = NULL,
+                          weight_function = "inverse loss", family = "gaussian",
+                          best_loss = Inf, best_basis_set = NULL, best_loss_batch = NULL, best_loss_traj = NULL) {
       self$X <- X
       self$y <- y
       self$len_candidate_basis_set <- len_candidate_basis_set
@@ -47,6 +52,11 @@ sHAL <- R6Class("sHAL",
       self$probs_keys <- NULL
       self$probs <- NULL
       self$family <- family
+
+      self$best_loss <- best_loss
+      self$best_basis_set <- best_basis_set
+      self$best_loss_batch <- best_loss_batch
+      self$best_loss_traj <- best_loss_traj
     },
 
     generate_basis_set = function() {
@@ -103,7 +113,7 @@ sHAL <- R6Class("sHAL",
       }
 
       # make design matrix
-      basis_matrix <- make_design_matrix(basis_set, self$X[row_indices, ])
+      basis_matrix <- make_design_matrix(basis_set, as.data.frame(self$X[row_indices, ]))
 
       # train-validation split
       train_indices <- sample(x = 1:nrow(basis_matrix),
@@ -150,15 +160,17 @@ sHAL <- R6Class("sHAL",
                                    null_loss)
       }
 
-      return(list(non_zero_basis, weight))
+      return(list(non_zero_basis, weight, loss))
     },
 
     get_top_k = function(n_sample) {
+
       hash_keys <- names(self$basis_hash_table)
       loss_vals <- mget(hash_keys, envir = self$basis_hash_table,
                         inherits = FALSE)
       sorted_keys <- hash_keys[order(unlist(loss_vals), decreasing = TRUE)]
-      top_keys <- sorted_keys[1:n_sample]
+      top_keys <- sorted_keys[1:ifelse(length(sorted_keys) < n_sample,
+                                       length(sorted_keys), n_sample)]
       top_basis_set <- map(top_keys, function(hash_key) Basis$new(hash_key))
 
       return(top_basis_set)
@@ -183,7 +195,7 @@ sHAL <- R6Class("sHAL",
         if (verbose) {
           pb$tick()
         }
-        print(i)
+        print("iteration: " %+% i %+% ", best loss: " %+% self$best_loss)
 
         # generate random candidate basis sets
         n_random <- ifelse(is.null(self$probs),
@@ -198,12 +210,25 @@ sHAL <- R6Class("sHAL",
                                   function(x) self$sample_basis_set())
 
         # evaluate candidate basis sets in parallel
-        eval_res <- mclapply(c(random_basis_sets, sampled_basis_sets), self$evaluate_candidate, mc.cores = 5)
+        eval_res <- mclapply(c(random_basis_sets, sampled_basis_sets), self$evaluate_candidate, mc.cores = self$n_cores)
 
         # update basis weights
         walk(eval_res, function(.x) {
           self$update_weight(.x[[1]], .x[[2]])
         })
+
+        # keep track of best loss
+        cur_loss <- map(eval_res, function(.x) {
+          return(.x[[3]])
+        })
+        cur_best_loss <- min(unlist(cur_loss))
+        if (cur_best_loss < self$best_loss) {
+          self$best_loss <- cur_best_loss
+          self$best_basis_set <- c(random_basis_sets, sampled_basis_sets)[[which.min(unlist(cur_loss))]]
+          self$best_loss_batch <- i
+        }
+
+        self$best_loss_traj <- c(self$best_loss_traj, self$best_loss)
 
         # update basis keys and their sampling distribution
         self$probs_keys <- names(self$basis_hash_table)
@@ -214,7 +239,8 @@ sHAL <- R6Class("sHAL",
         self$probs <- weights / sum(weights)
       }
 
-      sampled_basis_set <- self$get_top_k(self$len_final_basis_set)
+      # sampled_basis_set <- self$get_top_k(self$len_final_basis_set)
+      sampled_basis_set <- self$best_basis_set
 
       # fit CV Lasso on the sampled basis set
       final_lasso <- self$fit_sampled_basis_set(sampled_basis_set)
