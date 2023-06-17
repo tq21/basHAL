@@ -1,6 +1,6 @@
 #!/bin/bash
 # Job name:
-#SBATCH --job-name=job_3
+#SBATCH --job-name=laheart
 #
 # Partition:
 #SBATCH --partition=low
@@ -9,8 +9,8 @@
 #SBATCH --time=168:00:00
 #
 # Number of nodes for use case:
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
+#SBATCH --nodes=2
+#SBATCH --ntasks=2
 #SBATCH --cpus-per-task=32
 #
 # Mail type:
@@ -19,4 +19,8 @@
 # Mail user:
 #SBATCH --mail-user=sky.qiu@berkeley.edu
 
-R CMD BATCH --no-save 5_var_n_500_double_weight_v3.R 5_var_n_500_double_weight_v3_new_sHAL.Rout
+R CMD BATCH --no-save inverse_loss.R inverse_loss.Rout &
+R CMD BATCH --no-save double_weight_v3.R double_weight_v3.Rout &
+
+# Wait until all background processes finished
+wait

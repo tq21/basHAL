@@ -1,6 +1,6 @@
 library(devtools)
 load_all()
-source("sim_data.R")
+source("../sim_data.R")
 
 `%+%` <- function(a, b) paste0(a, b)
 

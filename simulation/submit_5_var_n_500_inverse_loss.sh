@@ -19,4 +19,4 @@
 # Mail user:
 #SBATCH --mail-user=sky.qiu@berkeley.edu
 
-R CMD BATCH --no-save 5_var_n_500_inverse_loss.R 5_var_n_500_inverse_loss.Rout
+R CMD BATCH --no-save 5_var_n_500_inverse_loss.R 5_var_n_500_inverse_loss_new_sHAL.Rout
