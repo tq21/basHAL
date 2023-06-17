@@ -2,6 +2,7 @@ library(purrr)
 library(glmnet)
 library(progress)
 library(parallel)
+library(origami)
 
 sHAL <- R6Class("sHAL",
   public = list(
@@ -27,12 +28,15 @@ sHAL <- R6Class("sHAL",
     best_basis_set = NULL,
     best_loss_batch = NULL,
     best_loss_traj = NULL,
+    loss_prop = 0.5,
+    cv_loss = FALSE,
 
     initialize = function(X, y, len_candidate_basis_set, len_final_basis_set,
                           max_rows, max_degree, batch_size = 50, n_batch = 50,
                           p = 0.1, alpha = NULL, V_folds = 5, n_cores = 1, seed = NULL,
                           weight_function = "inverse loss", family = "gaussian",
-                          best_loss = Inf, best_basis_set = NULL, best_loss_batch = NULL, best_loss_traj = NULL) {
+                          best_loss = Inf, best_basis_set = NULL, best_loss_batch = NULL, best_loss_traj = NULL,
+                          loss_prop = 0.5, cv_loss = FALSE) {
       self$X <- X
       self$y <- y
       self$len_candidate_basis_set <- len_candidate_basis_set
@@ -57,6 +61,9 @@ sHAL <- R6Class("sHAL",
       self$best_basis_set <- best_basis_set
       self$best_loss_batch <- best_loss_batch
       self$best_loss_traj <- best_loss_traj
+
+      self$loss_prop <- loss_prop
+      self$cv_loss <- cv_loss
     },
 
     generate_basis_set = function() {
@@ -115,51 +122,69 @@ sHAL <- R6Class("sHAL",
       # make design matrix
       basis_matrix <- make_design_matrix(basis_set, as.data.frame(self$X[row_indices, ]))
 
-      # train-validation split
-      train_indices <- sample(x = 1:nrow(basis_matrix),
-                              size = floor(0.8 * nrow(basis_matrix)))
-      X_train <- basis_matrix[train_indices, ]
-      X_valid <- basis_matrix[-train_indices, ]
-      y_train <- self$y[row_indices][train_indices]
-      y_valid <- self$y[row_indices][-train_indices]
+      loss <- NULL
+      if (self$cv_loss) {
+        # perform V-fold cross-validation to obtain CV loss
+        strata_ids <- NULL
+        if (self$family == "binomial") {
+          strata_ids <- self$y
+        }
+        folds <- make_folds(n = nrow(basis_matrix), V = self$V_folds, strata_ids = strata_ids)
+        losses <- map(folds, function(.x) {
+          train_indices <- .x$training_set
+          valid_indices <- .x$validation_set
+          X_train <- basis_matrix[train_indices, ]
+          X_valid <- basis_matrix[valid_indices, ]
+          y_train <- self$y[row_indices][train_indices]
+          y_valid <- self$y[row_indices][valid_indices]
 
-      # fit CV lasso on training set, evaluate loss on validation set
-      lasso <- cv.glmnet(X_train, y_train, alpha = 1, nfold = self$V_folds, family = self$family,
-                         standardize = FALSE, lambda.min.ratio = 1e-4)
-      preds <- predict(lasso, newx = X_valid, s = lasso$lambda.min, type = "response")
-      loss <- ifelse(self$family == "gaussian",
-                     sqrt(mean((y_valid - preds)^2)),
-                     -mean(y_valid * log(preds) + (1 - y_valid) * log(1 - preds)))
+          # fit CV lasso on training set, compute loss on validation set
+          lasso <- cv.glmnet(X_train, y_train,
+                             alpha = 1, nfold = self$V_folds, family = self$family,
+                             standardize = FALSE, lambda.min.ratio = 1e-4)
+          y_pred <- predict(lasso, newx = X_valid, s = lasso$lambda.min, type = "response")
+
+          return(get_loss(y_pred, y_valid, self$family))
+        })
+
+        loss <- mean(unlist(losses))
+
+      } else {
+        # train-validation split
+        strata_ids <- NULL
+        if (self$family == "binomial") {
+          strata_ids <- self$y
+        }
+        folds <- make_folds(n = nrow(basis_matrix), V = 1,
+                            fold_fun = folds_montecarlo,
+                            strata_ids = strata_ids)
+        train_indices <- folds[[1]]$training_set
+        valid_indices <- folds[[1]]$validation_set
+        X_train <- basis_matrix[train_indices, ]
+        X_valid <- basis_matrix[valid_indices, ]
+        y_train <- self$y[row_indices][train_indices]
+        y_valid <- self$y[row_indices][valid_indices]
+
+        # fit CV lasso on training set, evaluate loss on validation set
+        lasso <- cv.glmnet(X_train, y_train,
+                           alpha = 1, nfold = self$V_folds, family = self$family,
+                           standardize = FALSE, lambda.min.ratio = 1e-4)
+        y_pred <- predict(lasso, newx = X_valid, s = lasso$lambda.min, type = "response")
+        loss <- get_loss(y_pred, y_valid, self$family)
+      }
 
       # get basis with non-zero coefficients
       coef <- coef(lasso, s = lasso$lambda.min)[-1]
       non_zero_basis <- basis_set[which(coef != 0)]
 
       # null loss
-      null_loss <- ifelse(self$family == "gaussian",
-                          sqrt(mean((y_valid - mean(y_valid))^2)),
-                          -mean(y_valid * log(mean(y_valid)) + (1 - y_valid) * log(1 - mean(y_valid))))
+      null_loss <- get_loss(mean(y_valid), y_valid, self$family)
 
       # calculate weight using the specified weight function
-      weight <- NULL
-      if (self$weight_function == "inverse loss") {
-        weight <- inverse_loss_weight(loss)
-      } else if (self$weight_function == "double weight") {
-        weight <- double_weight(length(non_zero_basis),
-                                self$len_candidate_basis_set,
-                                loss,
-                                null_loss)
-      } else if (self$weight_function == "double weight v2") {
-        weight <- double_weight_v2(length(non_zero_basis),
-                                   self$len_candidate_basis_set,
-                                   loss,
-                                   null_loss)
-      } else if (self$weight_function == "double weight v3") {
-        weight <- double_weight_v3(length(non_zero_basis),
-                                   self$len_candidate_basis_set,
-                                   loss,
-                                   null_loss)
-      }
+      weight <- get_weight(self$weight_function,
+                           loss, null_loss,
+                           length(non_zero_basis), self$len_candidate_basis_set,
+                           loss_prop = self$loss_prop)
 
       return(list(non_zero_basis, weight, loss))
     },

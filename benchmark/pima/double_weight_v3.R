@@ -11,6 +11,6 @@ pima_double_weight_v3 <- run_benchmark(fpath = "../../data/small_data/pima.csv",
                                        p = 0.5,
                                        seed = 12941,
                                        weight_function = "double weight v3",
-                                       #family = "binomial",
+                                       family = "binomial",
                                        n_cores = 32)
 saveRDS(pima_double_weight_v3, "pima_double_weight_v3.RDS")

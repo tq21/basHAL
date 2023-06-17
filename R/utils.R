@@ -38,31 +38,35 @@ run_benchmark <- function(fpath,
   # load data
   dt <- read.csv(fpath)
   dt <- drop_na(dt)
-
-  set.seed(seed)
+  x_col_idx <- setdiff(seq_len(ncol(dt)), y_col_idx)
 
   # train-test split
-  train_indices <- sample(x = 1:nrow(dt), size = floor(0.8 * nrow(dt)))
+  set.seed(seed)
+  strata_ids <- NULL
+  if (family == "binomial") {
+    strata_ids <- dt[, y_col_idx]
+  }
+  folds <- make_folds(n = nrow(dt), V = 1,
+                      fold_fun = folds_montecarlo,
+                      strata_ids = strata_ids)
+  train_indices <- folds[[1]]$training_set
+  test_indices <- folds[[1]]$validation_set
   dt_train <- dt[train_indices, ]
-  dt_test <- dt[-train_indices, ]
-
-  x_col_idx <- setdiff(seq_len(ncol(dt)), y_col_idx)
+  dt_test <- dt[test_indices, ]
 
   # run hal9001 --------------------------------------------------------------
   print("running hal9001...")
   hal9001_fit <- fit_hal(X = dt_train[, x_col_idx],
                          Y = dt_train[, y_col_idx],
                          family = family,
-                         max_degree = max_degree,
+                         max_degree = 9,
                          smoothness_orders = 0)
 
   # get loss
   hal9001_pred <- predict(hal9001_fit,
                           new_data = dt_test[, x_col_idx], type = "response")
   hal9001_true <- dt_test[, y_col_idx]
-  hal9001_loss <- ifelse(family == "gaussian",
-                         sqrt(mean((hal9001_pred - hal9001_true)^2)),
-                         -mean(hal9001_true * log(hal9001_pred) + (1 - hal9001_true) * log(1 - hal9001_pred)))
+  hal9001_loss <- get_loss(hal9001_pred, hal9001_true, family)
 
   # get number of non zero coefficients
   hal9001_num_non_zero <- length(summary(hal9001_fit)$table$coef) - 1 # exclude intercept
@@ -90,18 +94,20 @@ run_benchmark <- function(fpath,
   basis_matrix_test <- make_design_matrix(sHAL_basis_set, dt_test[, x_col_idx])
   sHAL_pred <- predict(sHAL_lasso, newx = basis_matrix_test, type = "response", s = "lambda.min")
   sHAL_true <- dt_test[, y_col_idx]
-  sHAL_loss <- ifelse(family == "gaussian",
-                      sqrt(mean((sHAL_pred - sHAL_true)^2)),
-                      -mean(sHAL_true * log(sHAL_pred) + (1 - sHAL_true) * log(1 - sHAL_pred)))
+  sHAL_loss <- get_loss(sHAL_pred, sHAL_true, family)
 
   # get number of non zero coefficients
   sHAL_num_non_zero <- sum(coef(sHAL_lasso) != 0)
+
+  # get best loss trajectory
+  best_loss_traj <- sHAL_obj$best_loss_traj
 
   return(list(hal9001_loss,
               hal9001_num_non_zero,
               sHAL_loss,
               sHAL_num_non_zero,
-              sHAL_basis_set))
+              sHAL_basis_set,
+              best_loss_traj))
 }
 
 # real data
