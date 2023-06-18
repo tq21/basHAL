@@ -1,3 +1,5 @@
+library(ggplot2)
+
 # count the number of degree 1, 2, ..., g-basis functions in a basis set
 count_basis <- function(basis_set) {
   degrees <- sapply(basis_set, function(basis) length(basis[["col_indices"]]))
@@ -34,6 +36,7 @@ run_benchmark <- function(fpath,
                           seed,
                           weight_function,
                           family = "gaussian",
+                          loss_prop,
                           n_cores) {
   # load data
   dt <- read.csv(fpath)
@@ -59,7 +62,7 @@ run_benchmark <- function(fpath,
   hal9001_fit <- fit_hal(X = dt_train[, x_col_idx],
                          Y = dt_train[, y_col_idx],
                          family = family,
-                         max_degree = 9,
+                         max_degree = max_degree,
                          smoothness_orders = 0)
 
   # get loss
@@ -85,6 +88,7 @@ run_benchmark <- function(fpath,
                        seed = seed,
                        weight_function = weight_function,
                        family = family,
+                       loss_prop = loss_prop,
                        n_cores = n_cores)
   sHAL_res <- sHAL_obj$run(verbose = TRUE, plot = FALSE)
   sHAL_lasso <- sHAL_res[[1]]
@@ -170,4 +174,57 @@ run_real_data <- function(fpath,
   best_loss_traj <- sHAL_obj$best_loss_traj # loss trajectory
 
   return(list(sHAL_loss, sHAL_num_non_zero, best_loss_traj, sHAL_basis_set))
+}
+
+plot_valid_loss <- function(valid_loss,
+                            y_low,
+                            y_high,
+                            by,
+                            title) {
+  plt_df <- data.frame(loss = valid_loss, iter = seq(1, length(valid_loss)))
+  plt_df <- plt_df[!duplicated(plt_df$loss), ]
+  plt_df <- rbind(plt_df, data.frame(loss = min(valid_loss), iter = length(valid_loss)))
+
+  p <- ggplot(plt_df, aes(x = iter, y = loss)) +
+    geom_point(color = "black") +
+    geom_step(color = "black") +
+    scale_x_continuous(breaks = seq(0, length(valid_loss), by = 20),
+                       limits = c(0, 100)) +
+    scale_y_continuous(breaks = seq(y_low, y_high, by = by),
+                       limits = c(y_low, y_high)) +
+    labs(title = title,
+         x = "Iteration",
+         y = "Validation loss") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5),
+          text = element_text(size = 14),
+          axis.title = element_text(size = 16),
+          legend.position = "none")
+
+  return(p)
+}
+
+plot_test_loss <- function(test_loss,
+                           y_low,
+                           y_high,
+                           by,
+                           title) {
+  plt_df <- data.frame(loss = test_loss, prop_loss = seq(0, 1, 0.1))
+
+  p <- ggplot(plt_df, aes(x = prop_loss, y = loss)) +
+    geom_point(color = "black", shape = 17) +
+    scale_x_continuous(breaks = seq(0, 1, by = 0.2),
+                       limits = c(0, 1)) +
+    scale_y_continuous(breaks = seq(y_low, y_high, by = by),
+                       limits = c(y_low, y_high)) +
+    labs(title = title,
+         x = "Proportion of loss",
+         y = "Test loss") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5),
+          text = element_text(size = 14),
+          axis.title = element_text(size = 16),
+          legend.position = "none")
+
+  return(p)
 }

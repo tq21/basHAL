@@ -9,3 +9,5 @@ get_result <- function(fname) {
 
 get_result("benchmark/out/cpu_inverse_loss.RDS")
 get_result("benchmark/out/cpu_double_weight_v3.RDS")
+
+plot_valid_loss()

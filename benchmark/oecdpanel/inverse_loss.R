@@ -6,10 +6,10 @@ oecdpanel_inverse_loss <- run_benchmark(fpath = "../../data/small_data/oecdpanel
                                         len_final_basis_set = 616,
                                         max_rows = 616,
                                         max_degree = 6,
-                                        batch_size = 100,
-                                        n_batch = 100,
+                                        batch_size = 200,
+                                        n_batch = 200,
                                         p = 0.5,
                                         seed = 12941,
                                         weight_function = "inverse loss",
                                         n_cores = 32)
-saveRDS(oecdpanel_inverse_loss, "../out/oecdpanel_inverse_loss.RDS")
+saveRDS(oecdpanel_inverse_loss, "oecdpanel_inverse_loss.RDS")
