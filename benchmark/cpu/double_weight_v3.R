@@ -7,9 +7,9 @@ cpu_double_weight_v3 <- run_benchmark(fpath = "../../data/small_data/cpu.csv",
                                       max_rows = 209,
                                       max_degree = 6,
                                       batch_size = 100,
-                                      n_batch = 100,
+                                      n_batch = 200,
                                       p = 0.5,
                                       seed = 12941,
                                       weight_function = "double weight v3",
                                       n_cores = 32)
-saveRDS(cpu_double_weight_v3, "../out/cpu_double_weight_v3.RDS")
+saveRDS(cpu_double_weight_v3, "out/cpu_double_weight_v3.RDS")

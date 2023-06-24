@@ -7,10 +7,10 @@ pima_inverse_loss <- run_benchmark(fpath = "../../data/small_data/pima.csv",
                                    max_rows = 392,
                                    max_degree = 7,
                                    batch_size = 100,
-                                   n_batch = 100,
+                                   n_batch = 200,
                                    p = 0.5,
                                    seed = 12941,
                                    weight_function = "inverse loss",
                                    family = "binomial",
                                    n_cores = 32)
-saveRDS(pima_inverse_loss, "pima_inverse_loss.RDS")
+saveRDS(pima_inverse_loss, "out/pima_inverse_loss.RDS")

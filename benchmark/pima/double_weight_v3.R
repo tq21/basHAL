@@ -7,10 +7,10 @@ pima_double_weight_v3 <- run_benchmark(fpath = "../../data/small_data/pima.csv",
                                        max_rows = 392,
                                        max_degree = 7,
                                        batch_size = 100,
-                                       n_batch = 100,
+                                       n_batch = 200,
                                        p = 0.5,
                                        seed = 12941,
                                        weight_function = "double weight v3",
                                        family = "binomial",
                                        n_cores = 32)
-saveRDS(pima_double_weight_v3, "pima_double_weight_v3.RDS")
+saveRDS(pima_double_weight_v3, "out/pima_double_weight_v3.RDS")

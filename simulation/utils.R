@@ -4,7 +4,6 @@ source("../sim_data.R")
 
 `%+%` <- function(a, b) paste0(a, b)
 
-set.seed(124141)
 run_sim <- function(n,
                     type,
                     len_candidate_basis_set,
@@ -19,6 +18,8 @@ run_sim <- function(n,
                     family,
                     n_cores,
                     n_test = 10000) {
+  set.seed(seed)
+
   # univariate
   sim_uni_smooth_dt <- sim_uni_smooth(n)
   sim_uni_smooth_dt_test <- sim_uni_smooth(n_test)
@@ -62,6 +63,8 @@ run_sim <- function(n,
     dt_list_test <- list(sim_five_smooth_dt_test, sim_five_jump_dt_test, sim_five_smooth_dt_test)
   }
 
+  res_list <- list()
+
   for (i in 1:length(dt_list)) {
     print(i %+% " out of " %+% length(dt_list))
     dt <- dt_list[[i]]
@@ -99,8 +102,8 @@ run_sim <- function(n,
     best_loss_traj <- sHAL_obj$best_loss_traj # loss trajectory
     best_loss_batch <- sHAL_obj$best_loss_batch # batch number for the best loss
 
-    # save lasso fit and basis set
-    save(list = c("sHAL_lasso", "sHAL_basis_set", "best_loss_traj", "best_loss_batch"),
-         file = "simulation_" %+% i %+% "_" %+% gsub(" ", "_", weight_function) %+% ".RData")
+    res_list[[i]] <- list(list(sHAL_lasso, sHAL_basis_set, best_loss_traj, best_loss_batch))
   }
+
+  return(res_list)
 }

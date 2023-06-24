@@ -36,7 +36,7 @@ run_benchmark <- function(fpath,
                           seed,
                           weight_function,
                           family = "gaussian",
-                          loss_prop,
+                          loss_prop = 0.5,
                           n_cores) {
   # load data
   dt <- read.csv(fpath)

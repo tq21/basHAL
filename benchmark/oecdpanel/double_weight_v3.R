@@ -6,10 +6,10 @@ oecdpanel_double_weight_v3 <- run_benchmark(fpath = "../../data/small_data/oecdp
                                             len_final_basis_set = 616,
                                             max_rows = 616,
                                             max_degree = 6,
-                                            batch_size = 200,
+                                            batch_size = 100,
                                             n_batch = 200,
                                             p = 0.5,
                                             seed = 12941,
                                             weight_function = "double weight v3",
                                             n_cores = 32)
-saveRDS(oecdpanel_double_weight_v3, "oecdpanel_double_weight_v3.RDS")
+saveRDS(oecdpanel_double_weight_v3, "out/oecdpanel_double_weight_v3.RDS")

@@ -1,0 +1,384 @@
+
+R version 4.3.0 (2023-04-21) -- "Already Tomorrow"
+Copyright (C) 2023 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> source("../utils.R")
+Loading required package: usethis
+ℹ Loading sHAL
+Loading required package: Matrix
+Loaded glmnet 4.1-7
+origami v1.0.7: Generalized Framework for Cross-Validation
+Loading required package: Rcpp
+hal9001 v0.4.3: The Scalable Highly Adaptive Lasso
+note: fit_hal defaults have changed. See ?fit_hal for details
+── Attaching core tidyverse packages ──────────────────────── tidyverse 2.0.0 ──
+✔ dplyr     1.1.2     ✔ readr     2.1.4
+✔ forcats   1.0.0     ✔ tibble    3.2.1
+✔ lubridate 1.9.2     ✔ tidyr     1.3.0
+── Conflicts ────────────────────────────────────────── tidyverse_conflicts() ──
+✖ tidyr::expand() masks Matrix::expand()
+✖ dplyr::filter() masks stats::filter()
+✖ dplyr::lag()    masks stats::lag()
+✖ tidyr::pack()   masks Matrix::pack()
+✖ tidyr::unpack() masks Matrix::unpack()
+ℹ Use the conflicted package (<http://conflicted.r-lib.org/>) to force all conflicts to become errors
+
+Attaching package: ‘data.table’
+
+The following objects are masked from ‘package:lubridate’:
+
+    hour, isoweek, mday, minute, month, quarter, second, wday, week,
+    yday, year
+
+The following objects are masked from ‘package:dplyr’:
+
+    between, first, last
+
+The following object is masked from ‘package:purrr’:
+
+    transpose
+
+> 
+> samp_res <- run_sim(n = 1000000,
++                     type = "five-variate",
++                     len_candidate_basis_set = 200,
++                     len_final_basis_set = 200,
++                     max_rows = 500,
++                     max_degree = 5,
++                     batch_size = 100,
++                     n_batch = 100,
++                     p = 0.5,
++                     seed = 141098,
++                     weight_function = "double weight v3",
++                     family = "gaussian",
++                     n_cores = 32)
+[1] "1 out of 3"
+[1] "iteration: 1, best loss: Inf"
+[1] "iteration: 2, best loss: 0.875634557641505"
+[1] "iteration: 3, best loss: 0.875634557641505"
+[1] "iteration: 4, best loss: 0.875634557641505"
+[1] "iteration: 5, best loss: 0.875634557641505"
+[1] "iteration: 6, best loss: 0.875634557641505"
+[1] "iteration: 7, best loss: 0.875634557641505"
+[1] "iteration: 8, best loss: 0.875634557641505"
+[1] "iteration: 9, best loss: 0.875634557641505"
+[1] "iteration: 10, best loss: 0.875634557641505"
+[1] "iteration: 11, best loss: 0.875634557641505"
+[1] "iteration: 12, best loss: 0.875634557641505"
+[1] "iteration: 13, best loss: 0.875634557641505"
+[1] "iteration: 14, best loss: 0.875634557641505"
+[1] "iteration: 15, best loss: 0.875634557641505"
+[1] "iteration: 16, best loss: 0.875634557641505"
+[1] "iteration: 17, best loss: 0.875634557641505"
+[1] "iteration: 18, best loss: 0.875634557641505"
+[1] "iteration: 19, best loss: 0.875634557641505"
+[1] "iteration: 20, best loss: 0.875634557641505"
+[1] "iteration: 21, best loss: 0.875634557641505"
+[1] "iteration: 22, best loss: 0.875634557641505"
+[1] "iteration: 23, best loss: 0.875634557641505"
+[1] "iteration: 24, best loss: 0.875634557641505"
+[1] "iteration: 25, best loss: 0.875634557641505"
+[1] "iteration: 26, best loss: 0.875634557641505"
+[1] "iteration: 27, best loss: 0.875634557641505"
+[1] "iteration: 28, best loss: 0.875634557641505"
+[1] "iteration: 29, best loss: 0.875634557641505"
+[1] "iteration: 30, best loss: 0.875634557641505"
+[1] "iteration: 31, best loss: 0.875634557641505"
+[1] "iteration: 32, best loss: 0.875634557641505"
+[1] "iteration: 33, best loss: 0.875634557641505"
+[1] "iteration: 34, best loss: 0.875634557641505"
+[1] "iteration: 35, best loss: 0.860880043969395"
+[1] "iteration: 36, best loss: 0.860880043969395"
+[1] "iteration: 37, best loss: 0.860880043969395"
+[1] "iteration: 38, best loss: 0.860880043969395"
+[1] "iteration: 39, best loss: 0.860880043969395"
+[1] "iteration: 40, best loss: 0.860880043969395"
+[1] "iteration: 41, best loss: 0.860880043969395"
+[1] "iteration: 42, best loss: 0.860880043969395"
+[1] "iteration: 43, best loss: 0.860880043969395"
+[1] "iteration: 44, best loss: 0.860880043969395"
+[1] "iteration: 45, best loss: 0.860880043969395"
+[1] "iteration: 46, best loss: 0.860880043969395"
+[1] "iteration: 47, best loss: 0.860880043969395"
+[1] "iteration: 48, best loss: 0.860880043969395"
+[1] "iteration: 49, best loss: 0.860880043969395"
+[1] "iteration: 50, best loss: 0.812990181416695"
+[1] "iteration: 51, best loss: 0.812990181416695"
+[1] "iteration: 52, best loss: 0.812990181416695"
+[1] "iteration: 53, best loss: 0.812990181416695"
+[1] "iteration: 54, best loss: 0.812990181416695"
+[1] "iteration: 55, best loss: 0.812990181416695"
+[1] "iteration: 56, best loss: 0.812990181416695"
+[1] "iteration: 57, best loss: 0.812990181416695"
+[1] "iteration: 58, best loss: 0.812990181416695"
+[1] "iteration: 59, best loss: 0.812990181416695"
+[1] "iteration: 60, best loss: 0.812990181416695"
+[1] "iteration: 61, best loss: 0.812990181416695"
+[1] "iteration: 62, best loss: 0.812990181416695"
+[1] "iteration: 63, best loss: 0.812990181416695"
+[1] "iteration: 64, best loss: 0.812990181416695"
+[1] "iteration: 65, best loss: 0.812990181416695"
+[1] "iteration: 66, best loss: 0.812990181416695"
+[1] "iteration: 67, best loss: 0.812990181416695"
+[1] "iteration: 68, best loss: 0.812990181416695"
+[1] "iteration: 69, best loss: 0.812990181416695"
+[1] "iteration: 70, best loss: 0.812990181416695"
+[1] "iteration: 71, best loss: 0.812990181416695"
+[1] "iteration: 72, best loss: 0.812990181416695"
+[1] "iteration: 73, best loss: 0.812990181416695"
+[1] "iteration: 74, best loss: 0.812990181416695"
+[1] "iteration: 75, best loss: 0.812990181416695"
+[1] "iteration: 76, best loss: 0.812990181416695"
+[1] "iteration: 77, best loss: 0.812990181416695"
+[1] "iteration: 78, best loss: 0.812990181416695"
+[1] "iteration: 79, best loss: 0.812990181416695"
+[1] "iteration: 80, best loss: 0.812990181416695"
+[1] "iteration: 81, best loss: 0.812990181416695"
+[1] "iteration: 82, best loss: 0.812990181416695"
+[1] "iteration: 83, best loss: 0.812990181416695"
+[1] "iteration: 84, best loss: 0.812990181416695"
+[1] "iteration: 85, best loss: 0.812990181416695"
+[1] "iteration: 86, best loss: 0.812990181416695"
+[1] "iteration: 87, best loss: 0.812990181416695"
+[1] "iteration: 88, best loss: 0.812990181416695"
+[1] "iteration: 89, best loss: 0.812990181416695"
+[1] "iteration: 90, best loss: 0.812990181416695"
+[1] "iteration: 91, best loss: 0.812990181416695"
+[1] "iteration: 92, best loss: 0.812990181416695"
+[1] "iteration: 93, best loss: 0.812990181416695"
+[1] "iteration: 94, best loss: 0.812990181416695"
+[1] "iteration: 95, best loss: 0.812990181416695"
+[1] "iteration: 96, best loss: 0.812990181416695"
+[1] "iteration: 97, best loss: 0.812990181416695"
+[1] "iteration: 98, best loss: 0.812990181416695"
+[1] "iteration: 99, best loss: 0.812990181416695"
+[1] "iteration: 100, best loss: 0.812990181416695"
+[1] "rmse: 1.04113367293158"
+[1] 147
+[1] "2 out of 3"
+[1] "iteration: 1, best loss: Inf"
+[1] "iteration: 2, best loss: 1.05890524689476"
+[1] "iteration: 3, best loss: 0.977726681009513"
+[1] "iteration: 4, best loss: 0.954309472171065"
+[1] "iteration: 5, best loss: 0.820623518118086"
+[1] "iteration: 6, best loss: 0.820623518118086"
+[1] "iteration: 7, best loss: 0.820623518118086"
+[1] "iteration: 8, best loss: 0.820623518118086"
+[1] "iteration: 9, best loss: 0.820623518118086"
+[1] "iteration: 10, best loss: 0.820623518118086"
+[1] "iteration: 11, best loss: 0.820623518118086"
+[1] "iteration: 12, best loss: 0.820623518118086"
+[1] "iteration: 13, best loss: 0.820623518118086"
+[1] "iteration: 14, best loss: 0.820623518118086"
+[1] "iteration: 15, best loss: 0.820623518118086"
+[1] "iteration: 16, best loss: 0.820623518118086"
+[1] "iteration: 17, best loss: 0.820623518118086"
+[1] "iteration: 18, best loss: 0.820623518118086"
+[1] "iteration: 19, best loss: 0.820623518118086"
+[1] "iteration: 20, best loss: 0.820623518118086"
+[1] "iteration: 21, best loss: 0.820623518118086"
+[1] "iteration: 22, best loss: 0.820623518118086"
+[1] "iteration: 23, best loss: 0.820623518118086"
+[1] "iteration: 24, best loss: 0.820623518118086"
+[1] "iteration: 25, best loss: 0.820623518118086"
+[1] "iteration: 26, best loss: 0.820623518118086"
+[1] "iteration: 27, best loss: 0.820623518118086"
+[1] "iteration: 28, best loss: 0.820623518118086"
+[1] "iteration: 29, best loss: 0.820623518118086"
+[1] "iteration: 30, best loss: 0.820623518118086"
+[1] "iteration: 31, best loss: 0.820623518118086"
+[1] "iteration: 32, best loss: 0.820623518118086"
+[1] "iteration: 33, best loss: 0.820623518118086"
+[1] "iteration: 34, best loss: 0.820623518118086"
+[1] "iteration: 35, best loss: 0.820623518118086"
+[1] "iteration: 36, best loss: 0.820623518118086"
+[1] "iteration: 37, best loss: 0.820623518118086"
+[1] "iteration: 38, best loss: 0.820623518118086"
+[1] "iteration: 39, best loss: 0.820623518118086"
+[1] "iteration: 40, best loss: 0.820623518118086"
+[1] "iteration: 41, best loss: 0.820623518118086"
+[1] "iteration: 42, best loss: 0.820623518118086"
+[1] "iteration: 43, best loss: 0.820623518118086"
+[1] "iteration: 44, best loss: 0.820623518118086"
+[1] "iteration: 45, best loss: 0.820623518118086"
+[1] "iteration: 46, best loss: 0.820623518118086"
+[1] "iteration: 47, best loss: 0.820623518118086"
+[1] "iteration: 48, best loss: 0.820623518118086"
+[1] "iteration: 49, best loss: 0.820623518118086"
+[1] "iteration: 50, best loss: 0.820623518118086"
+[1] "iteration: 51, best loss: 0.820623518118086"
+[1] "iteration: 52, best loss: 0.820623518118086"
+[1] "iteration: 53, best loss: 0.820623518118086"
+[1] "iteration: 54, best loss: 0.820623518118086"
+[1] "iteration: 55, best loss: 0.820623518118086"
+[1] "iteration: 56, best loss: 0.820623518118086"
+[1] "iteration: 57, best loss: 0.820623518118086"
+[1] "iteration: 58, best loss: 0.820623518118086"
+[1] "iteration: 59, best loss: 0.820623518118086"
+[1] "iteration: 60, best loss: 0.820623518118086"
+[1] "iteration: 61, best loss: 0.820623518118086"
+[1] "iteration: 62, best loss: 0.820623518118086"
+[1] "iteration: 63, best loss: 0.820623518118086"
+[1] "iteration: 64, best loss: 0.820623518118086"
+[1] "iteration: 65, best loss: 0.820623518118086"
+[1] "iteration: 66, best loss: 0.820623518118086"
+[1] "iteration: 67, best loss: 0.820623518118086"
+[1] "iteration: 68, best loss: 0.820623518118086"
+[1] "iteration: 69, best loss: 0.820623518118086"
+[1] "iteration: 70, best loss: 0.820623518118086"
+[1] "iteration: 71, best loss: 0.820623518118086"
+[1] "iteration: 72, best loss: 0.820623518118086"
+[1] "iteration: 73, best loss: 0.820623518118086"
+[1] "iteration: 74, best loss: 0.820623518118086"
+[1] "iteration: 75, best loss: 0.820623518118086"
+[1] "iteration: 76, best loss: 0.820623518118086"
+[1] "iteration: 77, best loss: 0.820623518118086"
+[1] "iteration: 78, best loss: 0.820623518118086"
+[1] "iteration: 79, best loss: 0.820623518118086"
+[1] "iteration: 80, best loss: 0.820623518118086"
+[1] "iteration: 81, best loss: 0.820623518118086"
+[1] "iteration: 82, best loss: 0.820623518118086"
+[1] "iteration: 83, best loss: 0.820623518118086"
+[1] "iteration: 84, best loss: 0.820623518118086"
+[1] "iteration: 85, best loss: 0.820623518118086"
+[1] "iteration: 86, best loss: 0.820623518118086"
+[1] "iteration: 87, best loss: 0.820623518118086"
+[1] "iteration: 88, best loss: 0.820623518118086"
+[1] "iteration: 89, best loss: 0.820623518118086"
+[1] "iteration: 90, best loss: 0.820623518118086"
+[1] "iteration: 91, best loss: 0.820623518118086"
+[1] "iteration: 92, best loss: 0.820623518118086"
+[1] "iteration: 93, best loss: 0.820623518118086"
+[1] "iteration: 94, best loss: 0.820623518118086"
+[1] "iteration: 95, best loss: 0.820623518118086"
+[1] "iteration: 96, best loss: 0.820623518118086"
+[1] "iteration: 97, best loss: 0.820623518118086"
+[1] "iteration: 98, best loss: 0.820623518118086"
+[1] "iteration: 99, best loss: 0.820623518118086"
+[1] "iteration: 100, best loss: 0.820623518118086"
+[1] "rmse: 1.03800590268383"
+[1] 114
+[1] "3 out of 3"
+[1] "iteration: 1, best loss: Inf"
+[1] "iteration: 2, best loss: 1.00189031767248"
+[1] "iteration: 3, best loss: 0.939564866790207"
+[1] "iteration: 4, best loss: 0.904747696186079"
+[1] "iteration: 5, best loss: 0.904747696186079"
+[1] "iteration: 6, best loss: 0.904747696186079"
+[1] "iteration: 7, best loss: 0.904747696186079"
+[1] "iteration: 8, best loss: 0.904747696186079"
+[1] "iteration: 9, best loss: 0.904747696186079"
+[1] "iteration: 10, best loss: 0.904747696186079"
+[1] "iteration: 11, best loss: 0.904747696186079"
+[1] "iteration: 12, best loss: 0.904747696186079"
+[1] "iteration: 13, best loss: 0.904747696186079"
+[1] "iteration: 14, best loss: 0.865622169149032"
+[1] "iteration: 15, best loss: 0.865622169149032"
+[1] "iteration: 16, best loss: 0.865622169149032"
+[1] "iteration: 17, best loss: 0.865622169149032"
+[1] "iteration: 18, best loss: 0.865622169149032"
+[1] "iteration: 19, best loss: 0.865622169149032"
+[1] "iteration: 20, best loss: 0.865622169149032"
+[1] "iteration: 21, best loss: 0.865622169149032"
+[1] "iteration: 22, best loss: 0.865622169149032"
+[1] "iteration: 23, best loss: 0.865622169149032"
+[1] "iteration: 24, best loss: 0.865622169149032"
+[1] "iteration: 25, best loss: 0.865622169149032"
+[1] "iteration: 26, best loss: 0.865622169149032"
+[1] "iteration: 27, best loss: 0.865622169149032"
+[1] "iteration: 28, best loss: 0.865622169149032"
+[1] "iteration: 29, best loss: 0.865622169149032"
+[1] "iteration: 30, best loss: 0.865622169149032"
+[1] "iteration: 31, best loss: 0.865622169149032"
+[1] "iteration: 32, best loss: 0.865622169149032"
+[1] "iteration: 33, best loss: 0.865622169149032"
+[1] "iteration: 34, best loss: 0.865622169149032"
+[1] "iteration: 35, best loss: 0.865622169149032"
+[1] "iteration: 36, best loss: 0.865622169149032"
+[1] "iteration: 37, best loss: 0.865622169149032"
+[1] "iteration: 38, best loss: 0.865622169149032"
+[1] "iteration: 39, best loss: 0.865622169149032"
+[1] "iteration: 40, best loss: 0.852884130146779"
+[1] "iteration: 41, best loss: 0.852884130146779"
+[1] "iteration: 42, best loss: 0.758101851168957"
+[1] "iteration: 43, best loss: 0.758101851168957"
+[1] "iteration: 44, best loss: 0.758101851168957"
+[1] "iteration: 45, best loss: 0.758101851168957"
+[1] "iteration: 46, best loss: 0.758101851168957"
+[1] "iteration: 47, best loss: 0.758101851168957"
+[1] "iteration: 48, best loss: 0.758101851168957"
+[1] "iteration: 49, best loss: 0.758101851168957"
+[1] "iteration: 50, best loss: 0.758101851168957"
+[1] "iteration: 51, best loss: 0.758101851168957"
+[1] "iteration: 52, best loss: 0.758101851168957"
+[1] "iteration: 53, best loss: 0.758101851168957"
+[1] "iteration: 54, best loss: 0.758101851168957"
+[1] "iteration: 55, best loss: 0.758101851168957"
+[1] "iteration: 56, best loss: 0.758101851168957"
+[1] "iteration: 57, best loss: 0.758101851168957"
+[1] "iteration: 58, best loss: 0.758101851168957"
+[1] "iteration: 59, best loss: 0.758101851168957"
+[1] "iteration: 60, best loss: 0.758101851168957"
+[1] "iteration: 61, best loss: 0.758101851168957"
+[1] "iteration: 62, best loss: 0.758101851168957"
+[1] "iteration: 63, best loss: 0.758101851168957"
+[1] "iteration: 64, best loss: 0.758101851168957"
+[1] "iteration: 65, best loss: 0.758101851168957"
+[1] "iteration: 66, best loss: 0.758101851168957"
+[1] "iteration: 67, best loss: 0.758101851168957"
+[1] "iteration: 68, best loss: 0.758101851168957"
+[1] "iteration: 69, best loss: 0.758101851168957"
+[1] "iteration: 70, best loss: 0.758101851168957"
+[1] "iteration: 71, best loss: 0.758101851168957"
+[1] "iteration: 72, best loss: 0.758101851168957"
+[1] "iteration: 73, best loss: 0.758101851168957"
+[1] "iteration: 74, best loss: 0.758101851168957"
+[1] "iteration: 75, best loss: 0.758101851168957"
+[1] "iteration: 76, best loss: 0.758101851168957"
+[1] "iteration: 77, best loss: 0.758101851168957"
+[1] "iteration: 78, best loss: 0.758101851168957"
+[1] "iteration: 79, best loss: 0.758101851168957"
+[1] "iteration: 80, best loss: 0.758101851168957"
+[1] "iteration: 81, best loss: 0.758101851168957"
+[1] "iteration: 82, best loss: 0.758101851168957"
+[1] "iteration: 83, best loss: 0.758101851168957"
+[1] "iteration: 84, best loss: 0.758101851168957"
+[1] "iteration: 85, best loss: 0.758101851168957"
+[1] "iteration: 86, best loss: 0.758101851168957"
+[1] "iteration: 87, best loss: 0.758101851168957"
+[1] "iteration: 88, best loss: 0.758101851168957"
+[1] "iteration: 89, best loss: 0.758101851168957"
+[1] "iteration: 90, best loss: 0.758101851168957"
+[1] "iteration: 91, best loss: 0.758101851168957"
+[1] "iteration: 92, best loss: 0.758101851168957"
+[1] "iteration: 93, best loss: 0.758101851168957"
+[1] "iteration: 94, best loss: 0.758101851168957"
+[1] "iteration: 95, best loss: 0.758101851168957"
+[1] "iteration: 96, best loss: 0.758101851168957"
+[1] "iteration: 97, best loss: 0.758101851168957"
+[1] "iteration: 98, best loss: 0.758101851168957"
+[1] "iteration: 99, best loss: 0.758101851168957"
+[1] "iteration: 100, best loss: 0.758101851168957"
+[1] "rmse: 1.04092576315782"
+[1] 160
+> 
+> saveRDS(samp_res, "out/samp_var_5_n_1M_double_weight_v3.RDS")
+> 
+> proc.time()
+     user    system   elapsed 
+140121.49  53661.33  27715.47 
