@@ -6,20 +6,19 @@ library(origami)
 
 sHAL <- R6Class("sHAL",
   public = list(
-    X = NULL,
-    y = NULL,
-    len_candidate_basis_set = NULL,
-    len_final_basis_set = NULL,
-    max_rows = NULL,
-    max_degree = NULL,
-    batch_size = 50,
-    n_batch = 50,
-    p = 0.1,
-    alpha = NULL,
-    V_folds = 5,
-    n_cores = 1,
-    seed = NULL,
-    weight_function = "inverse loss",
+    X = NULL, # covariate matrix X
+    y = NULL, # outcome vector Y
+    len_candidate_basis_set = NULL, # number of basis functions in each candidate basis set
+    len_final_basis_set = NULL, # number of basis functions in the final basis set
+    max_rows = NULL, # maximum number of rows use to fit small models
+    max_degree = NULL, # maximum basis degree of interaction
+    batch_size = 50, # number of candidates to generate in each iteration
+    n_batch = 50, # number of iterations
+    p = 0.5, # epsilon-greedy, epsilon proportion of candidate basis sets in each batch will be greedy
+    V_folds = 5, # V-fold cross validation
+    n_cores = 1, # number of cores to parallel across
+    seed = NULL, # seed
+    weight_function = "glmnet", # weight function, glmnet or glm
     basis_hash_table = NULL,
     probs_keys = NULL,
     probs = NULL,
@@ -30,13 +29,21 @@ sHAL <- R6Class("sHAL",
     best_loss_traj = NULL,
     loss_prop = 0.5,
     cv_loss = FALSE,
+    X_train = NULL,
+    X_valid = NULL,
+    y_train = NULL,
+    y_valid = NULL,
+    top_k = NULL,
+    small_fit = "glmnet",
+    cur_losses = NULL,
 
     initialize = function(X, y, len_candidate_basis_set, len_final_basis_set,
                           max_rows, max_degree, batch_size = 50, n_batch = 50,
-                          p = 0.1, alpha = NULL, V_folds = 5, n_cores = 1, seed = NULL,
-                          weight_function = "inverse loss", family = "gaussian",
-                          best_loss = Inf, best_basis_set = NULL, best_loss_batch = NULL, best_loss_traj = NULL,
-                          loss_prop = 0.5, cv_loss = FALSE) {
+                          p = 0.5, V_folds = 5, n_cores = 1, seed = NULL,
+                          weight_function = "glmnet", family = "gaussian",
+                          cur_losses = NULL, best_loss = Inf, best_basis_set = NULL, best_loss_batch = NULL, best_loss_traj = NULL,
+                          loss_prop = 0.5, cv_loss = FALSE, X_train = NULL, X_valid = NULL, y_train = NULL, y_valid = NULL,
+                          top_k = FALSE, small_fit = "glmnet") {
       self$X <- X
       self$y <- y
       self$len_candidate_basis_set <- len_candidate_basis_set
@@ -46,7 +53,6 @@ sHAL <- R6Class("sHAL",
       self$batch_size <- batch_size
       self$n_batch <- n_batch
       self$p <- p
-      self$alpha <- alpha
       self$V_folds <- V_folds
       self$n_cores <- n_cores
       self$seed <- seed
@@ -57,6 +63,7 @@ sHAL <- R6Class("sHAL",
       self$probs <- NULL
       self$family <- family
 
+      self$cur_losses <- cur_losses
       self$best_loss <- best_loss
       self$best_basis_set <- best_basis_set
       self$best_loss_batch <- best_loss_batch
@@ -64,19 +71,41 @@ sHAL <- R6Class("sHAL",
 
       self$loss_prop <- loss_prop
       self$cv_loss <- cv_loss
+      self$top_k <- top_k
+      self$small_fit <- small_fit
+
+      self$X_train <- X
+      self$y_train <- y
+
+      if (!top_k) {
+        # TODO: NOT WORKING AT THE MOMENT, A POTENTIAL FEATURE.
+        # make 1-fold validation set
+        strata_ids <- NULL
+        if (self$family == "binomial") {
+          strata_ids <- self$y
+        }
+        folds <- make_folds(n = nrow(self$X), V = 1, fold_fun = folds_montecarlo, strata_ids = strata_ids)
+        train_indices <- folds[[1]]$training_set
+        valid_indices <- folds[[1]]$validation_set
+        self$X_train <- as.data.frame(self$X[train_indices, ])
+        self$X_valid <- as.data.frame(self$X[valid_indices, ])
+        self$y_train <- self$y[train_indices]
+        self$y_valid <- self$y[valid_indices]
+      }
     },
 
+    # function to randomly generate a candidate basis set
     generate_basis_set = function() {
       # sample column indices
       col_indices <- map(seq_len(self$len_candidate_basis_set), function(i) {
-        sample(seq_len(ncol(self$X)),
+        sample(seq_len(ncol(self$X_train)),
                size = sample(seq_len(self$max_degree), size = 1),
                replace = FALSE)
       })
 
       # sample row index, get knot points
       knot_points <- map(col_indices, function(col_idx) {
-        as.numeric(self$X[sample(seq_len(nrow(self$X)), size = 1), col_idx])
+        as.numeric(self$X_train[sample(seq_len(nrow(self$X_train)), size = 1), col_idx])
       })
 
       # make candidate basis set
@@ -87,6 +116,8 @@ sHAL <- R6Class("sHAL",
       return(basis_set)
     },
 
+    # function to generate a candidate basis set by sampling without replacement
+    # from the current basis sampling distribution
     sample_basis_set = function() {
       # sample basis keys
       basis_keys <- sample(self$probs_keys,
@@ -95,8 +126,9 @@ sHAL <- R6Class("sHAL",
       sampled_basis_set <- map(basis_keys, function(hash_key) Basis$new(hash_key))
     },
 
-    update_weight = function(non_zero_basis, weight) {
-      walk(non_zero_basis, function(basis) {
+    # function to update the weights of the given bases
+    update_weight = function(bases, weights) {
+      walk2(bases, weights, function(basis, weight) {
         # get hash key
         hash_key <- basis$hash()
 
@@ -110,24 +142,61 @@ sHAL <- R6Class("sHAL",
       })
     },
 
+    # function to fit small lasso on the HAL design matrix of the given candidate basis set
+    fit_small_glmnet = function(X_train, y_train, X_valid) {
+      lasso_mod <- cv.glmnet(X_train, y_train, alpha = 1,
+                             nfold = self$V_folds, family = self$family,
+                             standardize = FALSE, lambda.min.ratio = 1e-4)
+      y_pred <- predict(lasso_mod, newx = X_valid, s = lasso_mod$lambda.min, type = "response")
+
+      # get basis with non-zero coefficients, need to update their weights later
+      coefs <- coef(lasso_mod, s = lasso_mod$lambda.min)[-1] # exclude intercept
+      non_zero_basis_idx <- which(coefs != 0)
+
+      return(list(y_pred, coefs, non_zero_basis_idx))
+    },
+
+    # function to fit small linear regression on the HAL design matrix of the given candidate basis set
+    # TODO: NOT WORKING AT THE MOMENT, A POTENTIAL FEATURE
+    fit_small_glm = function(basis_set, X_train, y_train, X_valid) {
+      data <- data.frame(y = y_train, X_train)
+      glm_mod <- glm(y ~ ., data = data, family = self$family)
+      y_pred <- predict(glm_mod, newdata = data.frame(X_valid), type = "response")
+      coefs <- coef(glm_mod)[-1]
+      coefs[is.na(coefs)] <- 0
+
+      # get top 10% of coefficients
+      ranked_indices <- order(abs(coefs), decreasing = TRUE)
+      top_indices <- ranked_indices[1:ceiling(0.1 * length(coefs))]
+      coefs <- coefs[top_indices]
+
+      return(list(y_pred, coefs, top_indices))
+    },
+
+    # function to evaluate the performance of the given candidate basis set
     evaluate_candidate = function(basis_set) {
       # either fit on full data or sampled data
       row_indices <- NULL
-      if (self$max_rows >= nrow(self$X)) {
-        row_indices <- seq_len(nrow(self$X))
+      if (self$max_rows >= nrow(self$X_train)) {
+        row_indices <- seq_len(nrow(self$X_train))
       } else {
-        row_indices <- sample(x = 1:nrow(self$X), size = self$max_rows)
+        row_indices <- sample(x = 1:nrow(self$X_train), size = self$max_rows)
       }
 
       # make design matrix
-      basis_matrix <- make_design_matrix(basis_set, as.data.frame(self$X[row_indices, ]))
+      basis_matrix <- make_design_matrix(basis_set, as.data.frame(self$X_train[row_indices, ]))
 
-      loss <- NULL
+      # initialize variables
+      loss <- NULL # CV loss of the candidate basis set
+      coefs <- NULL # small model coefficients (TODO: UPCOMING FEATURE)
+      basis_idx <- NULL # indices of basis to update weights for
+
       if (self$cv_loss) {
+        # TODO: NOT WORKING AT THE MOMENT, UPCOMING FEATURE
         # perform V-fold cross-validation to obtain CV loss
         strata_ids <- NULL
         if (self$family == "binomial") {
-          strata_ids <- self$y
+          strata_ids <- self$y_train
         }
         folds <- make_folds(n = nrow(basis_matrix), V = self$V_folds, strata_ids = strata_ids)
         losses <- map(folds, function(.x) {
@@ -135,14 +204,16 @@ sHAL <- R6Class("sHAL",
           valid_indices <- .x$validation_set
           X_train <- basis_matrix[train_indices, ]
           X_valid <- basis_matrix[valid_indices, ]
-          y_train <- self$y[row_indices][train_indices]
-          y_valid <- self$y[row_indices][valid_indices]
+          y_train <- self$y_train[row_indices][train_indices]
+          y_valid <- self$y_train[row_indices][valid_indices]
 
-          # fit CV lasso on training set, compute loss on validation set
-          lasso <- cv.glmnet(X_train, y_train,
-                             alpha = 1, nfold = self$V_folds, family = self$family,
-                             standardize = FALSE, lambda.min.ratio = 1e-4)
-          y_pred <- predict(lasso, newx = X_valid, s = lasso$lambda.min, type = "response")
+          # fit small model on training set
+          y_pred <- NULL
+          if (self$small_fit == "glm") {
+            y_pred <- self$fit_small_glm(X_train, y_train, X_valid)
+          } else if (self$small_fit == "glmnet") {
+            y_pred <- self$fit_small_glmnet(X_train, y_train, X_valid)
+          }
 
           return(get_loss(y_pred, y_valid, self$family))
         })
@@ -150,10 +221,10 @@ sHAL <- R6Class("sHAL",
         loss <- mean(unlist(losses))
 
       } else {
-        # train-validation split
+        # perform 1-fold cross-validation to obtain CV loss
         strata_ids <- NULL
         if (self$family == "binomial") {
-          strata_ids <- self$y
+          strata_ids <- self$y_train
         }
         folds <- make_folds(n = nrow(basis_matrix), V = 1,
                             fold_fun = folds_montecarlo,
@@ -162,35 +233,39 @@ sHAL <- R6Class("sHAL",
         valid_indices <- folds[[1]]$validation_set
         X_train <- basis_matrix[train_indices, ]
         X_valid <- basis_matrix[valid_indices, ]
-        y_train <- self$y[row_indices][train_indices]
-        y_valid <- self$y[row_indices][valid_indices]
+        y_train <- self$y_train[row_indices][train_indices]
+        y_valid <- self$y_train[row_indices][valid_indices]
 
-        # fit CV lasso on training set, evaluate loss on validation set
-        lasso <- cv.glmnet(X_train, y_train,
-                           alpha = 1, nfold = self$V_folds, family = self$family,
-                           standardize = FALSE, lambda.min.ratio = 1e-4)
-        y_pred <- predict(lasso, newx = X_valid, s = lasso$lambda.min, type = "response")
+        # fit small model on training set
+        fit_res <- NULL
+        if (self$small_fit == "glm") {
+          fit_res <- self$fit_small_glm(X_train, y_train, X_valid)
+        } else if (self$small_fit == "glmnet") {
+          fit_res <- self$fit_small_glmnet(X_train, y_train, X_valid)
+        }
+        y_pred <- fit_res[[1]]
+        coefs <- fit_res[[2]]
+        basis_idx <- fit_res[[3]]
         loss <- get_loss(y_pred, y_valid, self$family)
       }
 
-      # get basis with non-zero coefficients
-      coef <- coef(lasso, s = lasso$lambda.min)[-1]
-      non_zero_basis <- basis_set[which(coef != 0)]
+      # calculate weights
+      weights <- get_weights(weight_fun = self$weight_function,
+                             loss = loss,
+                             base_loss = get_loss(ifelse(self$family == "binomial", 0.5, mean(y_valid)),
+                                                  y_valid,
+                                                  self$family),
+                             coefs = coefs,
+                             num_non_zero = length(basis_idx),
+                             total_num = self$len_candidate_basis_set,
+                             loss_prop = self$loss_prop)
 
-      # null loss
-      null_loss <- get_loss(mean(y_valid), y_valid, self$family)
-
-      # calculate weight using the specified weight function
-      weight <- get_weight(self$weight_function,
-                           loss, null_loss,
-                           length(non_zero_basis), self$len_candidate_basis_set,
-                           loss_prop = self$loss_prop)
-
-      return(list(non_zero_basis, weight, loss))
+      return(list(basis_set[basis_idx], weights, loss))
     },
 
-    get_top_k = function(n_sample) {
-
+    # function to select the K bases with the highest sampling probability
+    # to form the final basis set
+    get_top_K = function(n_sample) {
       hash_keys <- names(self$basis_hash_table)
       loss_vals <- mget(hash_keys, envir = self$basis_hash_table,
                         inherits = FALSE)
@@ -202,14 +277,35 @@ sHAL <- R6Class("sHAL",
       return(top_basis_set)
     },
 
-    fit_sampled_basis_set = function(sampled_basis_set) {
-      basis_matrix <- make_design_matrix(sampled_basis_set, self$X)
-      cv_fit <- cv.glmnet(basis_matrix, self$y, nfolds = self$V_folds, alpha = 1,
+    # function to fit model on the HAL design matrix of the final basis set
+    fit_final_basis_set = function(final_basis_set) {
+      basis_matrix <- make_design_matrix(final_basis_set, self$X)
+
+      fit <- NULL
+      if (self$small_fit == "glm") {
+        data <- data.frame(y = self$y, basis_matrix)
+        fit <- glm(y ~ ., data = data, family = self$family)
+      } else if (self$small_fit == "glmnet") {
+        fit <- cv.glmnet(basis_matrix, self$y, nfolds = self$V_folds, alpha = 1,
+                         standardize = FALSE,
+                         lambda.min.ratio = 1e-4,
+                         family = self$family)
+      }
+
+      return(fit)
+    },
+
+    # function to get out-of-sample loss of a given candidate basis set
+    get_os_loss = function(basis_set) {
+      basis_matrix <- make_design_matrix(basis_set, self$X_valid)
+      cv_fit <- cv.glmnet(basis_matrix, self$y_valid, nfolds = self$V_folds, alpha = 1,
                           standardize = FALSE,
                           lambda.min.ratio = 1e-4,
                           family = self$family)
+      y_pred <- predict(cv_fit, newx = basis_matrix, s = cv_fit$lambda.min, type = "response")
+      os_loss <- get_loss(y_pred, self$y_valid, self$family)
 
-      return(cv_fit)
+      return(os_loss)
     },
 
     run = function(verbose = FALSE, plot = FALSE) {
@@ -224,7 +320,7 @@ sHAL <- R6Class("sHAL",
         if (verbose) {
           pb$tick()
         }
-        print("iteration: " %+% i %+% ", best loss: " %+% self$best_loss)
+        #print("iteration: " %+% i %+% ", best loss: " %+% self$best_loss)
 
         # generate random candidate basis sets
         n_random <- ifelse(is.null(self$probs),
@@ -246,18 +342,23 @@ sHAL <- R6Class("sHAL",
           self$update_weight(.x[[1]], .x[[2]])
         })
 
-        # keep track of best loss
-        cur_loss <- map(eval_res, function(.x) {
-          return(.x[[3]])
-        })
-        cur_best_loss <- min(unlist(cur_loss))
-        if (cur_best_loss < self$best_loss) {
-          self$best_loss <- cur_best_loss
-          self$best_basis_set <- c(random_basis_sets, sampled_basis_sets)[[which.min(unlist(cur_loss))]]
-          self$best_loss_batch <- i
-        }
+        cur_best_basis_set <- self$get_top_K(self$len_final_basis_set)
+        cur_best_res <- self$evaluate_candidate(cur_best_basis_set)
 
-        self$best_loss_traj <- c(self$best_loss_traj, self$best_loss)
+        self$cur_losses <- c(self$cur_losses, cur_best_res[[3]])
+
+        # evaluate out-of-sample losses, keep track of best out-of-sample loss
+        # TODO: POTENTIAL FEATURE
+        if (!self$top_k) {
+          os_losses <- mclapply(c(random_basis_sets, sampled_basis_sets), self$get_os_loss, mc.cores = self$n_cores)
+          cur_best_loss <- min(unlist(os_losses))
+          if (cur_best_loss < self$best_loss) {
+            self$best_loss <- cur_best_loss
+            self$best_basis_set <- c(random_basis_sets, sampled_basis_sets)[[which.min(unlist(os_losses))]]
+            self$best_loss_batch <- i
+          }
+          self$best_loss_traj <- c(self$best_loss_traj, self$best_loss)
+        }
 
         # update basis keys and their sampling distribution
         self$probs_keys <- names(self$basis_hash_table)
@@ -268,18 +369,117 @@ sHAL <- R6Class("sHAL",
         self$probs <- weights / sum(weights)
       }
 
-      # sampled_basis_set <- self$get_top_k(self$len_final_basis_set)
-      sampled_basis_set <- self$best_basis_set
+      # get final basis set
+      final_basis_set <- NULL
+      if (self$top_k) {
+        final_basis_set <- self$get_top_K(self$len_final_basis_set)
+      } else {
+        final_basis_set <- self$best_basis_set
+      }
 
       # fit CV Lasso on the sampled basis set
-      final_lasso <- self$fit_sampled_basis_set(sampled_basis_set)
+      final_lasso <- self$fit_final_basis_set(final_basis_set)
 
       # plot length of dictionary
       if (plot) {
         plot(dict_length, xlab = "Batch", ylab = "Dictionary length", type = 'l')
       }
 
-      return(list(final_lasso, sampled_basis_set))
+      return(list(final_lasso, final_basis_set))
     }
   )
 )
+
+# fpath = "../../data/small_data/cpu.csv"
+# y_col_idx <- 1
+# dt <- read.csv(fpath)
+# dt <- drop_na(dt)
+# x_col_idx <- setdiff(seq_len(ncol(dt)), y_col_idx)
+#
+# X = dt[, x_col_idx]
+# y = dt[, y_col_idx]
+#
+# len_candidate_basis_set = 50
+# len_final_basis_set = 50
+# max_rows = 209
+# max_degree = 6
+# batch_size = 50
+# n_batch = 50
+# p = 0.5
+# alpha = NULL
+# V_folds = 5
+# n_cores = 1
+# seed = 123
+# weight_function = "glm"
+# basis_hash_table = NULL
+# probs_keys = NULL
+# probs = NULL
+# family = "gaussian"
+# best_loss = Inf
+# best_basis_set = NULL
+# best_loss_batch = NULL
+# best_loss_traj = NULL
+# loss_prop = 0.5
+# cv_loss = FALSE
+# X_train = NULL
+# X_valid = NULL
+# y_train = NULL
+# y_valid = NULL
+# top_k = NULL
+# small_fit = "glm"
+#
+# self <- list()
+#
+# self$X <- X
+# self$y <- y
+# self$len_candidate_basis_set <- len_candidate_basis_set
+# self$len_final_basis_set <- len_final_basis_set
+# self$max_rows <- max_rows
+# self$max_degree <- max_degree
+# self$batch_size <- batch_size
+# self$n_batch <- n_batch
+# self$p <- p
+# self$alpha <- alpha
+# self$V_folds <- V_folds
+# self$n_cores <- n_cores
+# self$seed <- seed
+# self$weight_function <- weight_function
+#
+# self$basis_hash_table <- new.env(hash = TRUE)
+# self$probs_keys <- NULL
+# self$probs <- NULL
+# self$family <- family
+#
+# self$best_loss <- best_loss
+# self$best_basis_set <- best_basis_set
+# self$best_loss_batch <- best_loss_batch
+# self$best_loss_traj <- best_loss_traj
+#
+# self$loss_prop <- loss_prop
+# self$cv_loss <- cv_loss
+# self$top_k <- top_k
+# self$small_fit <- small_fit
+#
+# # make 1-fold validation set
+# strata_ids <- NULL
+# if (self$family == "binomial") {
+#   strata_ids <- self$y
+# }
+# folds <- make_folds(n = nrow(self$X), V = 1, fold_fun = folds_montecarlo, strata_ids = strata_ids)
+# train_indices <- folds[[1]]$training_set
+# valid_indices <- folds[[1]]$validation_set
+# self$X_train <- as.data.frame(self$X[train_indices, ])
+# self$X_valid <- as.data.frame(self$X[valid_indices, ])
+# self$y_train <- self$y[train_indices]
+# self$y_valid <- self$y[valid_indices]
+#
+#
+# self$generate_basis_set <- generate_basis_set
+# self$sample_basis_set <- sample_basis_set
+# self$update_weight <- update_weight
+# self$fit_small_glmnet <- fit_small_glmnet
+# self$fit_small_glm <- fit_small_glm
+# self$evaluate_candidate <- evaluate_candidate
+# self$get_top_K <- get_top_K
+# self$fit_final_basis_set <- fit_final_basis_set
+# self$get_os_loss <- get_os_loss

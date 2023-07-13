@@ -32,86 +32,162 @@ run_benchmark <- function(fpath,
                           max_degree,
                           batch_size,
                           n_batch,
-                          p,
-                          seed,
                           weight_function,
+                          seed,
                           family = "gaussian",
                           loss_prop = 0.5,
-                          n_cores) {
+                          n_cores,
+                          top_k) {
   # load data
   dt <- read.csv(fpath)
   dt <- drop_na(dt)
   x_col_idx <- setdiff(seq_len(ncol(dt)), y_col_idx)
 
-  # train-test split
+  # 10-fold CV
   set.seed(seed)
   strata_ids <- NULL
   if (family == "binomial") {
     strata_ids <- dt[, y_col_idx]
   }
-  folds <- make_folds(n = nrow(dt), V = 1,
-                      fold_fun = folds_montecarlo,
+
+  V <- 10
+
+  folds <- make_folds(n = nrow(dt), V = V,
+                      fold_fun = folds_vfold,
                       strata_ids = strata_ids)
-  train_indices <- folds[[1]]$training_set
-  test_indices <- folds[[1]]$validation_set
-  dt_train <- dt[train_indices, ]
-  dt_test <- dt[test_indices, ]
 
-  # run hal9001 --------------------------------------------------------------
-  print("running hal9001...")
-  hal9001_fit <- fit_hal(X = dt_train[, x_col_idx],
-                         Y = dt_train[, y_col_idx],
-                         family = family,
-                         max_degree = max_degree,
-                         smoothness_orders = 0)
+  hal9001_loss <- c()
+  hal9001_non_zero <- c()
+  random_loss <- c()
+  random_non_zero <- c()
+  bsas_1_loss <- c()
+  bsas_1_non_zero <- c()
+  bsas_2_loss <- c()
+  bsas_2_non_zero <- c()
 
-  # get loss
-  hal9001_pred <- predict(hal9001_fit,
-                          new_data = dt_test[, x_col_idx], type = "response")
-  hal9001_true <- dt_test[, y_col_idx]
-  hal9001_loss <- get_loss(hal9001_pred, hal9001_true, family)
+  for (v in 1:V) {
+    print("fold: " %+% v)
+    train_indices <- folds[[v]]$training_set
+    test_indices <- folds[[v]]$validation_set
+    dt_train <- dt[train_indices, ]
+    dt_valid <- dt[test_indices, ]
 
-  # get number of non zero coefficients
-  hal9001_num_non_zero <- length(summary(hal9001_fit)$table$coef) - 1 # exclude intercept
+    # run hal9001 --------------------------------------------------------------
+    # print("running hal9001...")
+    # hal9001_fit <- fit_hal(X = dt_train[, x_col_idx],
+    #                        Y = dt_train[, y_col_idx],
+    #                        family = family,
+    #                        max_degree = 9,
+    #                        smoothness_orders = 0)
+#
+    # # get loss
+    # hal9001_pred <- predict(hal9001_fit, new_data = dt_valid[, x_col_idx], type = "response")
+    # hal9001_loss <- c(hal9001_loss, get_loss(hal9001_pred, dt_valid[, y_col_idx], family))
+#
+    # # get number of non zero coefficients
+    # hal9001_non_zero <- c(hal9001_non_zero, length(summary(hal9001_fit)$table$coef) - 1) # exclude intercept
 
-  # run sHAL -----------------------------------------------------------------
-  print("running sHAL...")
-  sHAL_obj <- sHAL$new(X = dt_train[, x_col_idx],
-                       y = dt_train[, y_col_idx],
-                       len_candidate_basis_set = len_candidate_basis_set,
-                       len_final_basis_set = len_final_basis_set,
-                       max_rows = max_rows,
-                       max_degree = max_degree,
-                       batch_size = batch_size,
-                       n_batch = n_batch,
-                       p = p,
-                       seed = seed,
-                       weight_function = weight_function,
-                       family = family,
-                       loss_prop = loss_prop,
-                       n_cores = n_cores)
-  sHAL_res <- sHAL_obj$run(verbose = TRUE, plot = FALSE)
-  sHAL_lasso <- sHAL_res[[1]]
-  sHAL_basis_set <- sHAL_res[[2]]
+    # run random ---------------------------------------------------------------
+    # print("running random...")
+    # random_obj <- sHAL$new(X = dt_train[, x_col_idx],
+    #                        y = dt_train[, y_col_idx],
+    #                        len_candidate_basis_set = len_candidate_basis_set,
+    #                        len_final_basis_set = len_final_basis_set,
+    #                        max_rows = max_rows,
+    #                        max_degree = max_degree,
+    #                        batch_size = 1,
+    #                        n_batch = 1,
+    #                        p = 1,
+    #                        seed = seed,
+    #                        weight_function = weight_function,
+    #                        family = family,
+    #                        loss_prop = loss_prop,
+    #                        n_cores = n_cores,
+    #                        top_k = FALSE)
+    # random_res <- random_obj$run(verbose = TRUE, plot = FALSE)
+    # random_lasso <- random_res[[1]]
+    # random_basis_set <- random_res[[2]]
+#
+    # # get loss
+    # basis_matrix_valid <- make_design_matrix(random_basis_set, dt_valid[, x_col_idx])
+    # random_pred <- predict(random_lasso, newx = basis_matrix_valid, type = "response", s = "lambda.min")
+    # random_loss <- c(random_loss, get_loss(random_pred, dt_valid[, y_col_idx], family))
+#
+    # # get number of non zero coefficients
+    # random_non_zero <- c(random_non_zero, sum(coef(random_lasso) != 0))
 
-  # get rmse
-  basis_matrix_test <- make_design_matrix(sHAL_basis_set, dt_test[, x_col_idx])
-  sHAL_pred <- predict(sHAL_lasso, newx = basis_matrix_test, type = "response", s = "lambda.min")
-  sHAL_true <- dt_test[, y_col_idx]
-  sHAL_loss <- get_loss(sHAL_pred, sHAL_true, family)
+    # run bsas 1 ---------------------------------------------------------------
+    print("running bsas 1...")
+    bsas_1_obj <- sHAL$new(X = dt_train[, x_col_idx],
+                           y = dt_train[, y_col_idx],
+                           len_candidate_basis_set = 100,
+                           len_final_basis_set = 50, # len_final_basis_set,
+                           max_rows = max_rows,
+                           max_degree = max_degree,
+                           batch_size = batch_size,
+                           n_batch = n_batch,
+                           p = 0.5,
+                           seed = seed,
+                           weight_function = weight_function,
+                           family = family,
+                           loss_prop = loss_prop,
+                           n_cores = n_cores,
+                           top_k = TRUE)
+    bsas_1_res <- bsas_1_obj$run(verbose = TRUE, plot = FALSE)
+    bsas_1_lasso <- bsas_1_res[[1]]
+    bsas_1_basis_set <- bsas_1_res[[2]]
 
-  # get number of non zero coefficients
-  sHAL_num_non_zero <- sum(coef(sHAL_lasso) != 0)
+    # get loss
+    basis_matrix_valid <- make_design_matrix(bsas_1_basis_set, dt_valid[, x_col_idx])
+    # bsas_1_pred <- predict(bsas_1_lasso, newx = basis_matrix_valid, type = "response", s = "lambda.min")
+    bsas_1_pred <- predict(bsas_1_lasso, newx = data.frame(basis_matrix_valid), type = "response")
+    bsas_1_loss <- c(bsas_1_loss, get_loss(bsas_1_pred, dt_valid[, y_col_idx], family))
 
-  # get best loss trajectory
-  best_loss_traj <- sHAL_obj$best_loss_traj
+    # get number of non zero coefficients
+    # bsas_1_non_zero <- c(bsas_1_non_zero, sum(coef(bsas_1_lasso) != 0))
 
-  return(list(hal9001_loss,
-              hal9001_num_non_zero,
-              sHAL_loss,
-              sHAL_num_non_zero,
-              sHAL_basis_set,
-              best_loss_traj))
+    # run bsas 2 ---------------------------------------------------------------
+    # print("running bsas 2...")
+    # bsas_2_obj <- sHAL$new(X = dt_train[, x_col_idx],
+    #                        y = dt_train[, y_col_idx],
+    #                        len_candidate_basis_set = 100,
+    #                        len_final_basis_set = len_final_basis_set,
+    #                        max_rows = max_rows,
+    #                        max_degree = max_degree,
+    #                        batch_size = batch_size,
+    #                        n_batch = n_batch,
+    #                        p = 0.5,
+    #                        seed = seed,
+    #                        weight_function = weight_function,
+    #                        family = family,
+    #                        loss_prop = loss_prop,
+    #                        n_cores = n_cores,
+    #                        top_k = TRUE)
+    # bsas_2_res <- bsas_2_obj$run(verbose = TRUE, plot = FALSE)
+    # bsas_2_lasso <- bsas_2_res[[1]]
+    # bsas_2_basis_set <- bsas_2_res[[2]]
+#
+    # # get loss
+    # basis_matrix_valid <- make_design_matrix(bsas_2_basis_set, dt_valid[, x_col_idx])
+    # bsas_2_pred <- predict(bsas_2_lasso, newx = basis_matrix_valid, type = "response", s = "lambda.min")
+    # bsas_2_loss <- c(bsas_2_loss, get_loss(bsas_2_pred, dt_valid[, y_col_idx], family))
+#
+    # # get number of non zero coefficients
+    # bsas_2_non_zero <- c(bsas_2_non_zero, sum(coef(bsas_2_lasso) != 0))
+#
+    # gc()
+  }
+
+  return(bsas_1_loss)
+
+  # return(list(hal9001_loss,
+  #             random_loss,
+  #             bsas_1_loss,
+  #             bsas_2_loss,
+  #             hal9001_non_zero,
+  #             random_non_zero,
+  #             bsas_1_non_zero,
+  #             bsas_2_non_zero))
 }
 
 # real data
@@ -186,8 +262,8 @@ plot_valid_loss <- function(valid_loss,
   plt_df <- rbind(plt_df, data.frame(loss = min(valid_loss), iter = length(valid_loss)))
 
   p <- ggplot(plt_df, aes(x = iter, y = loss)) +
-    geom_point(color = "black") +
-    geom_step(color = "black") +
+    #geom_point(color = "black") +
+    geom_step(color = "black", lwd = 1) +
     scale_x_continuous(breaks = seq(0, length(valid_loss), by = 20),
                        limits = c(0, 100)) +
     scale_y_continuous(breaks = seq(y_low, y_high, by = by),
