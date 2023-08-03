@@ -37,7 +37,7 @@ x_col_idx <- setdiff(seq(1, ncol(data)), y_col_idx)
 X <- as.matrix(data[, x_col_idx])
 y <- as.matrix(data[, y_col_idx])
 
-set.seed(9847)
+set.seed(12345)
 
 # train-test split
 indices <- sample(seq_len(nrow(X)), size = 0.2 * nrow(X))
@@ -52,7 +52,7 @@ basHAL_obj <- basHAL$new(X = X_train,
                          len_candidate_basis_set = nrow(X_train),
                          len_final_basis_set = nrow(X_train),
                          max_rows = nrow(X_train),
-                         max_degree = 10,
+                         max_degree = 5,
                          batch_size = 50,
                          n_batch = 50,
                          p = 0.5,
@@ -70,9 +70,9 @@ final_basis_set <- result[[2]]
 # generate basis matrix for test data
 basis_matrix_test <- make_design_matrix(final_basis_set, X_test)
 test_pred <- predict(final_lasso, newx = basis_matrix_test)
-s_hal_rmse <- sqrt(mean((y_test - test_pred)^2))
-print(paste("basHAL RMSE: ", s_hal_rmse))
-#> [1] "basHAL RMSE:  4.24949973932284"
+basHAL_rmse <- sqrt(mean((y_test - test_pred)^2))
+print(paste("basHAL RMSE: ", basHAL_rmse))
+#> [1] "basHAL RMSE:  3.864894203462"
 ```
 
 ------------------------------------------------------------------------
