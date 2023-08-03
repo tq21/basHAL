@@ -37,20 +37,21 @@ run_benchmark <- function(fpath,
                           family = "gaussian",
                           loss_prop = 0.5,
                           n_cores,
-                          top_k) {
+                          top_k,
+                          cv_loss) {
   # load data
   dt <- read.csv(fpath)
   dt <- drop_na(dt)
   x_col_idx <- setdiff(seq_len(ncol(dt)), y_col_idx)
 
-  # 10-fold CV
+  # 5-fold CV
   set.seed(seed)
   strata_ids <- NULL
   if (family == "binomial") {
     strata_ids <- dt[, y_col_idx]
   }
 
-  V <- 10
+  V <- 5
 
   folds <- make_folds(n = nrow(dt), V = V,
                       fold_fun = folds_vfold,
@@ -73,19 +74,19 @@ run_benchmark <- function(fpath,
     dt_valid <- dt[test_indices, ]
 
     # run hal9001 --------------------------------------------------------------
-    # print("running hal9001...")
-    # hal9001_fit <- fit_hal(X = dt_train[, x_col_idx],
-    #                        Y = dt_train[, y_col_idx],
-    #                        family = family,
-    #                        max_degree = 9,
-    #                        smoothness_orders = 0)
-#
-    # # get loss
-    # hal9001_pred <- predict(hal9001_fit, new_data = dt_valid[, x_col_idx], type = "response")
-    # hal9001_loss <- c(hal9001_loss, get_loss(hal9001_pred, dt_valid[, y_col_idx], family))
-#
-    # # get number of non zero coefficients
-    # hal9001_non_zero <- c(hal9001_non_zero, length(summary(hal9001_fit)$table$coef) - 1) # exclude intercept
+    print("running hal9001...")
+    hal9001_fit <- fit_hal(X = dt_train[, x_col_idx],
+                           Y = dt_train[, y_col_idx],
+                           family = family,
+                           max_degree = 9,
+                           smoothness_orders = 0)
+
+    # get loss
+    hal9001_pred <- predict(hal9001_fit, new_data = dt_valid[, x_col_idx], type = "response")
+    hal9001_loss <- c(hal9001_loss, get_loss(hal9001_pred, dt_valid[, y_col_idx], family))
+
+    # get number of non zero coefficients
+    hal9001_non_zero <- c(hal9001_non_zero, length(summary(hal9001_fit)$table$coef) - 1) # exclude intercept
 
     # run random ---------------------------------------------------------------
     # print("running random...")
@@ -120,8 +121,8 @@ run_benchmark <- function(fpath,
     print("running bsas 1...")
     bsas_1_obj <- sHAL$new(X = dt_train[, x_col_idx],
                            y = dt_train[, y_col_idx],
-                           len_candidate_basis_set = 100,
-                           len_final_basis_set = 50, # len_final_basis_set,
+                           len_candidate_basis_set = len_candidate_basis_set,
+                           len_final_basis_set = len_final_basis_set,
                            max_rows = max_rows,
                            max_degree = max_degree,
                            batch_size = batch_size,
@@ -132,15 +133,16 @@ run_benchmark <- function(fpath,
                            family = family,
                            loss_prop = loss_prop,
                            n_cores = n_cores,
-                           top_k = TRUE)
+                           top_k = top_k,
+                           cv_loss = cv_loss)
     bsas_1_res <- bsas_1_obj$run(verbose = TRUE, plot = FALSE)
     bsas_1_lasso <- bsas_1_res[[1]]
     bsas_1_basis_set <- bsas_1_res[[2]]
 
     # get loss
     basis_matrix_valid <- make_design_matrix(bsas_1_basis_set, dt_valid[, x_col_idx])
-    # bsas_1_pred <- predict(bsas_1_lasso, newx = basis_matrix_valid, type = "response", s = "lambda.min")
-    bsas_1_pred <- predict(bsas_1_lasso, newx = data.frame(basis_matrix_valid), type = "response")
+    bsas_1_pred <- predict(bsas_1_lasso, newx = basis_matrix_valid, type = "response", s = "lambda.min")
+    #bsas_1_pred <- predict(bsas_1_lasso, newx = data.frame(basis_matrix_valid), type = "response")
     bsas_1_loss <- c(bsas_1_loss, get_loss(bsas_1_pred, dt_valid[, y_col_idx], family))
 
     # get number of non zero coefficients
@@ -178,7 +180,7 @@ run_benchmark <- function(fpath,
     # gc()
   }
 
-  return(bsas_1_loss)
+  return(list(hal9001_loss, bsas_1_loss))
 
   # return(list(hal9001_loss,
   #             random_loss,

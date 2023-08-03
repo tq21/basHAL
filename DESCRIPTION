@@ -1,11 +1,34 @@
-Package: sHAL
+Package: basHAL
 Type: Package
-Title: What the Package Does (Title Case)
+Title: Scalable Highly Adaptive Lasso for High-Dimensional Data
 Version: 0.1.0
-Author: Who wrote it
-Maintainer: The package maintainer <yourself@somewhere.net>
-Description: More about what it does (maybe more than one line)
-    Use four spaces when indenting paragraphs within the Description.
-License: What license is it under?
+Authors@R: c(
+    person("Sky", "Qiu", email = "sky.qiu@berkeley.edu", role = c("aut", "cre"),
+    person("Yi", "Li", email = "yi_li@berkeley.edu", role = "aut"),
+    person("Toru", "Shirakawa", role = "aut"),
+    person("Mark", "van der Laan", role = "aut"))
+Description: A scalable implementation of the highly adaptive lasso (HAL) estimator using a basis adaptive sampling (BAS) algorithm.
+    BAS samples subsets of HAL basis functions to form candidate basis sets, then iteratively updates the sampling probabilities 
+    of the basis functions. BAS avoids the computation and memory bottleneck of evaluating and storing the full HAL design matrix and
+    is thus scalable to high-dimensional data.
+URL: https://github.com/tq21/basHAL
+BugReports: https://github.com/tq21/basHAL/issues
+License: GPL-3
 Encoding: UTF-8
 LazyData: true
+Imports:
+    glmnet,
+    origami,
+    parallel,
+    progress,
+    purrr,
+    R6,
+    stats,
+    stringr
+Suggests:
+    testthat,
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
+RoxygenNote: 7.2.0
+Roxygen: list(markdown = TRUE)

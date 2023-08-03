@@ -35,15 +35,16 @@ sHAL <- R6Class("sHAL",
     y_valid = NULL,
     top_k = NULL,
     small_fit = "glmnet",
-    cur_losses = NULL,
+    top_K_losses = NULL,
+    avg_losses = NULL,
 
     initialize = function(X, y, len_candidate_basis_set, len_final_basis_set,
                           max_rows, max_degree, batch_size = 50, n_batch = 50,
                           p = 0.5, V_folds = 5, n_cores = 1, seed = NULL,
                           weight_function = "glmnet", family = "gaussian",
-                          cur_losses = NULL, best_loss = Inf, best_basis_set = NULL, best_loss_batch = NULL, best_loss_traj = NULL,
+                          top_K_losses = NULL, best_loss = Inf, best_basis_set = NULL, best_loss_batch = NULL, best_loss_traj = NULL,
                           loss_prop = 0.5, cv_loss = FALSE, X_train = NULL, X_valid = NULL, y_train = NULL, y_valid = NULL,
-                          top_k = FALSE, small_fit = "glmnet") {
+                          top_k = FALSE, small_fit = "glmnet", avg_losses = NULL) {
       self$X <- X
       self$y <- y
       self$len_candidate_basis_set <- len_candidate_basis_set
@@ -63,7 +64,7 @@ sHAL <- R6Class("sHAL",
       self$probs <- NULL
       self$family <- family
 
-      self$cur_losses <- cur_losses
+      self$top_K_losses <- top_K_losses
       self$best_loss <- best_loss
       self$best_basis_set <- best_basis_set
       self$best_loss_batch <- best_loss_batch
@@ -73,6 +74,7 @@ sHAL <- R6Class("sHAL",
       self$cv_loss <- cv_loss
       self$top_k <- top_k
       self$small_fit <- small_fit
+      self$avg_losses <- avg_losses
 
       self$X_train <- X
       self$y_train <- y
@@ -199,7 +201,7 @@ sHAL <- R6Class("sHAL",
           strata_ids <- self$y_train
         }
         folds <- make_folds(n = nrow(basis_matrix), V = self$V_folds, strata_ids = strata_ids)
-        losses <- map(folds, function(.x) {
+        fold_res <- map(folds, function(.x) {
           train_indices <- .x$training_set
           valid_indices <- .x$validation_set
           X_train <- basis_matrix[train_indices, ]
@@ -208,17 +210,22 @@ sHAL <- R6Class("sHAL",
           y_valid <- self$y_train[row_indices][valid_indices]
 
           # fit small model on training set
-          y_pred <- NULL
+          fold_fit_res <- NULL
           if (self$small_fit == "glm") {
-            y_pred <- self$fit_small_glm(X_train, y_train, X_valid)
+            fold_fit_res <- self$fit_small_glm(X_train, y_train, X_valid)
           } else if (self$small_fit == "glmnet") {
-            y_pred <- self$fit_small_glmnet(X_train, y_train, X_valid)
+            fold_fit_res <- self$fit_small_glmnet(X_train, y_train, X_valid)
           }
 
-          return(get_loss(y_pred, y_valid, self$family))
+          fold_y_pred <- fold_fit_res[[1]]
+          fold_non_zero_basis_idx <- fold_fit_res[[3]]
+          fold_loss <- get_loss(fold_y_pred, y_valid, self$family)
+
+          return(list(fold_loss, fold_non_zero_basis_idx))
         })
 
-        loss <- mean(unlist(losses))
+        loss <- mean(unlist(map(fold_res, function(.x) .x[[1]])))
+        basis_idx <- unique(unlist(map(fold_res, function(.x) .x[[2]])))
 
       } else {
         # perform 1-fold cross-validation to obtain CV loss
@@ -252,8 +259,8 @@ sHAL <- R6Class("sHAL",
       # calculate weights
       weights <- get_weights(weight_fun = self$weight_function,
                              loss = loss,
-                             base_loss = get_loss(ifelse(self$family == "binomial", 0.5, mean(y_valid)),
-                                                  y_valid,
+                             base_loss = get_loss(ifelse(self$family == "binomial", 0.5, mean(self$y_train)),
+                                                  self$y_train,
                                                   self$family),
                              coefs = coefs,
                              num_non_zero = length(basis_idx),
@@ -308,6 +315,38 @@ sHAL <- R6Class("sHAL",
       return(os_loss)
     },
 
+    # function to get the cv loss of a given candidate basis set
+    get_cv_loss = function(basis_set) {
+
+      basis_matrix <- make_design_matrix(basis_set, self$X_train)
+
+      strata_ids <- NULL
+      if (self$family == "binomial") {
+        strata_ids <- self$y_train
+      }
+      folds <- make_folds(n = nrow(basis_matrix), V = self$V_folds, strata_ids = strata_ids)
+      losses <- map(folds, function(.x) {
+        train_indices <- .x$training_set
+        valid_indices <- .x$validation_set
+        X_train <- basis_matrix[train_indices, ]
+        X_valid <- basis_matrix[valid_indices, ]
+        y_train <- self$y_train[train_indices]
+        y_valid <- self$y_train[valid_indices]
+
+        cv_fit <- cv.glmnet(X_train, y_train, nfolds = self$V_folds, alpha = 1,
+                            standardize = FALSE,
+                            lambda.min.ratio = 1e-4,
+                            family = self$family)
+        y_pred <- predict(cv_fit, newx = X_valid, s = cv_fit$lambda.min, type = "response")
+
+        return(get_loss(y_pred, y_valid, self$family))
+      })
+
+      cv_loss <- mean(unlist(losses))
+
+      return(cv_loss)
+    },
+
     run = function(verbose = FALSE, plot = FALSE) {
       dict_length <- vector()
 
@@ -342,10 +381,14 @@ sHAL <- R6Class("sHAL",
           self$update_weight(.x[[1]], .x[[2]])
         })
 
-        cur_best_basis_set <- self$get_top_K(self$len_final_basis_set)
-        cur_best_res <- self$evaluate_candidate(cur_best_basis_set)
+        cur_top_K_basis_set <- self$get_top_K(self$len_final_basis_set)
+        self$top_K_losses <- c(self$top_K_losses, self$get_cv_loss(cur_top_K_basis_set))
 
-        self$cur_losses <- c(self$cur_losses, cur_best_res[[3]])
+        cur_losses <- unlist(map(eval_res, function(.x) {
+          return(.x[[3]])
+        }))
+        cur_avg_loss <- mean(cur_losses[(n_random+1):length(cur_losses)])
+        self$avg_losses <- c(self$avg_losses, cur_avg_loss)
 
         # evaluate out-of-sample losses, keep track of best out-of-sample loss
         # TODO: POTENTIAL FEATURE
