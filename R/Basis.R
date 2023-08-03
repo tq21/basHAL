@@ -1,6 +1,20 @@
-library(R6)
-library(stringr)
-
+#' Basis class
+#'
+#' Class to parameterize a basis function with methods to hash and compare.
+#'
+#' @docType class
+#'
+#' @importFrom R6 R6Class
+#' @importFrom stringr strsplit
+#'
+#' @export
+#'
+#' @format \code{\link{R6Class}} object.
+#'
+#' @section Parameters:
+#' - \code{col_indices}: Integer vector of column indices.
+#' - \code{knot_points}: Numeric vector of knot points.
+#'
 Basis <- R6Class("Basis",
   public = list(
     col_indices = NULL,

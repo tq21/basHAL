@@ -1,10 +1,98 @@
-library(purrr)
-library(glmnet)
-library(progress)
-library(parallel)
-library(origami)
-
-sHAL <- R6Class("sHAL",
+#' @title Basis adaptive sampling for highly adaptive lasso
+#'
+#' @description
+#' This class implements the basis adaptive sampling algorithm
+#' for highly adaptive lasso.
+#'
+#' @docType class
+#'
+#' @importFrom R6 R6Class
+#' @importFrom purrr map map2
+#' @importFrom glmnet cv.glmnet
+#' @importFrom progress progress_bar
+#' @importFrom parallel mclapply
+#' @importFrom origami make_folds
+#'
+#' @export
+#'
+#' @example
+#' # load data
+#' data <- mtcars
+#'
+#' # get X and y
+#' y_col_idx <- 1
+#' x_col_idx <- setdiff(seq(1, ncol(data)), y_col_idx)
+#' X <- as.matrix(data[, x_col_idx])
+#' y <- as.matrix(data[, y_col_idx])
+#'
+#' set.seed(9847)
+#'
+#' # train-test split
+#' indices <- sample(seq_len(nrow(X)), size = 0.2 * nrow(X))
+#' X_test <- X[indices,]
+#' y_test <- y[indices]
+#' X_train <- X[-indices,]
+#' y_train <- y[-indices]
+#'
+#' # initialize basHAL object
+#' basHAL_obj <- basHAL$new(X = X_train,
+#'                          y = y_train,
+#'                          len_candidate_basis_set = nrow(X_train),
+#'                          len_final_basis_set = nrow(X_train),
+#'                          max_rows = nrow(X_train),
+#'                          max_degree = 10,
+#'                          batch_size = 50,
+#'                          n_batch = 50,
+#'                          p = 0.5,
+#'                          seed = 29857,
+#'                          weight_function = "glmnet",
+#'                          top_k = TRUE,
+#'                          n_cores = 5,
+#'                          cv_loss = TRUE)
+#'
+#' # run basHAL
+#' result <- basHAL_obj$run(verbose = TRUE, plot = FALSE)
+#' final_lasso <- result[[1]]
+#' final_basis_set <- result[[2]]
+#'
+#' # generate basis matrix for test data
+#' basis_matrix_test <- make_design_matrix(final_basis_set, X_test)
+#' pred <- predict(final_lasso, newx = basis_matrix_test)
+#' basHAL_rmse <- sqrt(mean((y_test - pred)^2))
+#'
+#' @return A basHAL object with methods to run the algorithm
+#' and extract final basis set.
+#'
+#' @format \code{\link{R6Class}} object.
+#'
+#' @section Parameters:
+#' - \code{X}: Covariate matrix. Rows are observations and columns are
+#'   covariates.
+#' - \code{y}: Outcome vector. Must be of length equal to the number of
+#'   rows in \code{X}.
+#' - \code{len_candidate_basis_set}: Number of basis functions \eqn{k}
+#'   in each candidate basis set.
+#' - \code{len_final_basis_set}: Number of basis functions \eqn{K} in
+#'   the final basis set.
+#' - \code{max_rows}: Maximum number of rows to sample when fitting
+#'   each small model. We recommend setting this to a number smaller than
+#'   the number of rows in \code{X} in large data sets for fast computation.
+#'   If \code{NULL}, all rows will be used.
+#' - \code{max_degree}: Maximum degree of interaction allowed in the basis
+#'   functions. By default, \code{max_degree=5}. When the number of covariates
+#'   \eqn{d} is smaller than 5, the \code{max_degree} is set to \eqn{d}.
+#' - \code{batch_size}: Number of candidate basis sets to generate
+#'   in each iteration.
+#' - \code{n_batch}: Total number of iterations to run.
+#' - \code{p}: Proportion of candidate basis sets in each batch that
+#'   will be sampled from the updated (posterior) sampling distribution.
+#'   The rest will be sampled from the prior distribution.
+#' - \code{V_folds}: Number of folds to split the data to in cross-validations
+#'   when evaluating candidate basis sets.
+#' - \code{n_cores}: Number of cpu cores to parallel across.
+#' - \code{seed}: Seed.
+#' - \code{weight_function}: Weight function, "glmnet" or "glm".
+basHAL <- R6Class("basHAL",
   public = list(
     X = NULL, # covariate matrix X
     y = NULL, # outcome vector Y
@@ -96,7 +184,10 @@ sHAL <- R6Class("sHAL",
       }
     },
 
-    # function to randomly generate a candidate basis set
+    #' @description
+    #' Randomly draw without replacement to form a candidate basis set.
+    #'
+    #' @return A list of \code{Basis} objects.
     generate_basis_set = function() {
       # sample column indices
       col_indices <- map(seq_len(self$len_candidate_basis_set), function(i) {
@@ -118,8 +209,12 @@ sHAL <- R6Class("sHAL",
       return(basis_set)
     },
 
-    # function to generate a candidate basis set by sampling without replacement
-    # from the current basis sampling distribution
+    #' @description
+    #' Draw without replacement from the updated sampling distribution of
+    #' basis functions to form a candidate basis set.
+    #' from the current basis sampling distribution
+    #'
+    #' @return A list of \code{Basis} objects.
     sample_basis_set = function() {
       # sample basis keys
       basis_keys <- sample(self$probs_keys,
@@ -128,7 +223,11 @@ sHAL <- R6Class("sHAL",
       sampled_basis_set <- map(basis_keys, function(hash_key) Basis$new(hash_key))
     },
 
-    # function to update the weights of the given bases
+    #' @description
+    #' Update the weights of the given basis functions.
+    #'
+    #' @param bases A list of \code{Basis} objects to update weights for.
+    #' @param weights A vector of weights to update the basis functions with.
     update_weight = function(bases, weights) {
       walk2(bases, weights, function(basis, weight) {
         # get hash key
@@ -144,7 +243,16 @@ sHAL <- R6Class("sHAL",
       })
     },
 
-    # function to fit small lasso on the HAL design matrix of the given candidate basis set
+    #' @description
+    #' Fit a cross-validated lasso on the training set,
+    #' predict using the validation set.
+    #'
+    #' @param X_train Training set design matrix.
+    #' @param y_train Training set response vector.
+    #' @param X_valid Validation set design matrix.
+    #'
+    #' @return A list of predictions, coefficients,
+    #' and indices of bases with non-zero coefficients.
     fit_small_glmnet = function(X_train, y_train, X_valid) {
       lasso_mod <- cv.glmnet(X_train, y_train, alpha = 1,
                              nfold = self$V_folds, family = self$family,
@@ -158,8 +266,11 @@ sHAL <- R6Class("sHAL",
       return(list(y_pred, coefs, non_zero_basis_idx))
     },
 
-    # function to fit small linear regression on the HAL design matrix of the given candidate basis set
-    # TODO: NOT WORKING AT THE MOMENT, A POTENTIAL FEATURE
+    #' @description
+    #' Fit a glm on the training set,
+    #' predict using the validation set.
+    #'
+    #' @todo THIS FUNCTION IS NOT WORKING AT THE MOMENT!!!
     fit_small_glm = function(basis_set, X_train, y_train, X_valid) {
       data <- data.frame(y = y_train, X_train)
       glm_mod <- glm(y ~ ., data = data, family = self$family)
@@ -175,7 +286,12 @@ sHAL <- R6Class("sHAL",
       return(list(y_pred, coefs, top_indices))
     },
 
-    # function to evaluate the performance of the given candidate basis set
+    #' @description
+    #' Evaluate the performance of the given candidate basis set.
+    #'
+    #' @param basis_set A list of \code{Basis} objects to evaluate.
+    #'
+    #' @return A list of bases indices, calculated weights, and loss.
     evaluate_candidate = function(basis_set) {
       # either fit on full data or sampled data
       row_indices <- NULL
@@ -194,7 +310,6 @@ sHAL <- R6Class("sHAL",
       basis_idx <- NULL # indices of basis to update weights for
 
       if (self$cv_loss) {
-        # TODO: NOT WORKING AT THE MOMENT, UPCOMING FEATURE
         # perform V-fold cross-validation to obtain CV loss
         strata_ids <- NULL
         if (self$family == "binomial") {
@@ -270,8 +385,13 @@ sHAL <- R6Class("sHAL",
       return(list(basis_set[basis_idx], weights, loss))
     },
 
-    # function to select the K bases with the highest sampling probability
-    # to form the final basis set
+    #' @description
+    #' Select the K bases with the highest sampling probability
+    #' to form the final basis set.
+    #'
+    #' @param n_sample The number of bases to select.
+    #'
+    #' @return A list of \code{Basis} objects.
     get_top_K = function(n_sample) {
       hash_keys <- names(self$basis_hash_table)
       loss_vals <- mget(hash_keys, envir = self$basis_hash_table,
@@ -284,7 +404,12 @@ sHAL <- R6Class("sHAL",
       return(top_basis_set)
     },
 
-    # function to fit model on the HAL design matrix of the final basis set
+    #' @description
+    #' Fit a cross-validated lasso on the final basis set.
+    #'
+    #' @param final_basis_set The final basis set selected.
+    #'
+    #' @return A fitted \code{glmnet} object.
     fit_final_basis_set = function(final_basis_set) {
       basis_matrix <- make_design_matrix(final_basis_set, self$X)
 
@@ -302,7 +427,14 @@ sHAL <- R6Class("sHAL",
       return(fit)
     },
 
-    # function to get out-of-sample loss of a given candidate basis set
+    #' @description
+    #' Get the out-of-sample loss of a given candidate basis set.
+    #'
+    #' @todo THIS FUNCTION IS NOT USED ANYMORE. REMOVE IT.
+    #'
+    #' @param basis_set A \code{Basis} object for the candidate basis set.
+    #'
+    #' @return The out-of-sample loss of the candidate basis set.
     get_os_loss = function(basis_set) {
       basis_matrix <- make_design_matrix(basis_set, self$X_valid)
       cv_fit <- cv.glmnet(basis_matrix, self$y_valid, nfolds = self$V_folds, alpha = 1,
@@ -315,7 +447,14 @@ sHAL <- R6Class("sHAL",
       return(os_loss)
     },
 
-    # function to get the cv loss of a given candidate basis set
+    #' @description
+    #' Get the cross-validated loss of a given candidate basis set.
+    #'
+    #' @todo THIS FUNCTION IS FOR TESTING PURPOSES ONLY.
+    #'
+    #' @param basis_set A \code{Basis} object for the candidate basis set.
+    #'
+    #' @return The cross-validated loss of the candidate basis set.
     get_cv_loss = function(basis_set) {
 
       basis_matrix <- make_design_matrix(basis_set, self$X_train)
@@ -347,6 +486,13 @@ sHAL <- R6Class("sHAL",
       return(cv_loss)
     },
 
+    #' @description
+    #' Run the algorithm.
+    #'
+    #' @param verbose Whether to print progress.
+    #' @param plot Whether to plot the rate at which the number of bases
+    #' explored increases. (FOR TESTING PURPOSES ONLY AT THE MOMENT,
+    #' LATER INCORPORATE INTO PROGRESS BAR)
     run = function(verbose = FALSE, plot = FALSE) {
       dict_length <- vector()
 
@@ -432,97 +578,3 @@ sHAL <- R6Class("sHAL",
     }
   )
 )
-
-# fpath = "../../data/small_data/cpu.csv"
-# y_col_idx <- 1
-# dt <- read.csv(fpath)
-# dt <- drop_na(dt)
-# x_col_idx <- setdiff(seq_len(ncol(dt)), y_col_idx)
-#
-# X = dt[, x_col_idx]
-# y = dt[, y_col_idx]
-#
-# len_candidate_basis_set = 50
-# len_final_basis_set = 50
-# max_rows = 209
-# max_degree = 6
-# batch_size = 50
-# n_batch = 50
-# p = 0.5
-# alpha = NULL
-# V_folds = 5
-# n_cores = 1
-# seed = 123
-# weight_function = "glm"
-# basis_hash_table = NULL
-# probs_keys = NULL
-# probs = NULL
-# family = "gaussian"
-# best_loss = Inf
-# best_basis_set = NULL
-# best_loss_batch = NULL
-# best_loss_traj = NULL
-# loss_prop = 0.5
-# cv_loss = FALSE
-# X_train = NULL
-# X_valid = NULL
-# y_train = NULL
-# y_valid = NULL
-# top_k = NULL
-# small_fit = "glm"
-#
-# self <- list()
-#
-# self$X <- X
-# self$y <- y
-# self$len_candidate_basis_set <- len_candidate_basis_set
-# self$len_final_basis_set <- len_final_basis_set
-# self$max_rows <- max_rows
-# self$max_degree <- max_degree
-# self$batch_size <- batch_size
-# self$n_batch <- n_batch
-# self$p <- p
-# self$alpha <- alpha
-# self$V_folds <- V_folds
-# self$n_cores <- n_cores
-# self$seed <- seed
-# self$weight_function <- weight_function
-#
-# self$basis_hash_table <- new.env(hash = TRUE)
-# self$probs_keys <- NULL
-# self$probs <- NULL
-# self$family <- family
-#
-# self$best_loss <- best_loss
-# self$best_basis_set <- best_basis_set
-# self$best_loss_batch <- best_loss_batch
-# self$best_loss_traj <- best_loss_traj
-#
-# self$loss_prop <- loss_prop
-# self$cv_loss <- cv_loss
-# self$top_k <- top_k
-# self$small_fit <- small_fit
-#
-# # make 1-fold validation set
-# strata_ids <- NULL
-# if (self$family == "binomial") {
-#   strata_ids <- self$y
-# }
-# folds <- make_folds(n = nrow(self$X), V = 1, fold_fun = folds_montecarlo, strata_ids = strata_ids)
-# train_indices <- folds[[1]]$training_set
-# valid_indices <- folds[[1]]$validation_set
-# self$X_train <- as.data.frame(self$X[train_indices, ])
-# self$X_valid <- as.data.frame(self$X[valid_indices, ])
-# self$y_train <- self$y[train_indices]
-# self$y_valid <- self$y[valid_indices]
-#
-#
-# self$generate_basis_set <- generate_basis_set
-# self$sample_basis_set <- sample_basis_set
-# self$update_weight <- update_weight
-# self$fit_small_glmnet <- fit_small_glmnet
-# self$fit_small_glm <- fit_small_glm
-# self$evaluate_candidate <- evaluate_candidate
-# self$get_top_K <- get_top_K
-# self$fit_final_basis_set <- fit_final_basis_set
-# self$get_os_loss <- get_os_loss

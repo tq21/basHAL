@@ -3,7 +3,7 @@ Type: Package
 Title: Scalable Highly Adaptive Lasso for High-Dimensional Data
 Version: 0.1.0
 Authors@R: c(
-    person("Sky", "Qiu", email = "sky.qiu@berkeley.edu", role = c("aut", "cre"),
+    person("Sky", "Qiu", email = "sky.qiu@berkeley.edu", role = c("aut", "cre")),
     person("Yi", "Li", email = "yi_li@berkeley.edu", role = "aut"),
     person("Toru", "Shirakawa", role = "aut"),
     person("Mark", "van der Laan", role = "aut"))
@@ -30,5 +30,5 @@ Suggests:
     knitr,
     rmarkdown
 VignetteBuilder: knitr
-RoxygenNote: 7.2.0
+RoxygenNote: 7.2.1
 Roxygen: list(markdown = TRUE)
