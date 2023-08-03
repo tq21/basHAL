@@ -7,7 +7,7 @@
 #' @docType class
 #'
 #' @importFrom R6 R6Class
-#' @importFrom purrr map map2
+#' @importFrom purrr map map2 walk walk2
 #' @importFrom glmnet cv.glmnet
 #' @importFrom progress progress_bar
 #' @importFrom parallel mclapply

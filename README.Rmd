@@ -1,31 +1,42 @@
+---
+always_allow_html: true
+output:
+  rmarkdown::github_document
+---
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, echo = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "README-"
+)
+```
 
 # R/`basHAL`: Basis adaptive sampling (BAS) for highly adaptive lasso (HAL)
 
 <!-- badges: start -->
-
-[![License: GPL
-v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 <!-- badges: end -->
 
-> A scalable implementation of highly adaptive lasso for
-> high-dimensional data using a basis adaptive sampling algorithm
+> A scalable implementation of highly adaptive lasso for high-dimensional data
+> using a basis adaptive sampling algorithm
 
-**Authors:** [Sky Qiu](https://github.com/tq21), [Yi
-Li](https://github.com/yiberkeley), [Toru
-Shirakawa](https://github.com/shirakawatoru)
+__Authors:__ [Sky Qiu](https://github.com/tq21),
+[Yi Li](https://github.com/yiberkeley),
+[Toru Shirakawa](https://github.com/shirakawatoru)
 
 ## Issues
 
-If you encounter any bugs or have any specific feature requests, please
-[file an issue](https://github.com/tq21/basHAL/issues).
+If you encounter any bugs or have any specific feature requests, please [file an
+issue](https://github.com/tq21/basHAL/issues).
 
-------------------------------------------------------------------------
+---
 
 ## Example
 
-``` r
+```{r basHAL-example, message=FALSE, warning=FALSE}
 library(basHAL)
 
 # load data
@@ -72,18 +83,17 @@ basis_matrix_test <- make_design_matrix(final_basis_set, X_test)
 test_pred <- predict(final_lasso, newx = basis_matrix_test)
 s_hal_rmse <- sqrt(mean((y_test - test_pred)^2))
 print(paste("basHAL RMSE: ", s_hal_rmse))
-#> [1] "basHAL RMSE:  4.24949973932284"
 ```
 
-------------------------------------------------------------------------
+---
 
 ## License
 
-© 2023 [Sky Qiu](https://github.com/tq21), [Yi
-Li](https://github.com/yiberkeley), [Toru
-Shirakawa](https://github.com/shirakawatoru)
+&copy; 2023 [Sky Qiu](https://github.com/tq21), 
+[Yi Li](https://github.com/yiberkeley), 
+[Toru Shirakawa](https://github.com/shirakawatoru)
 
-The contents of this repository are distributed under the GPL-3 license.
-See file `LICENSE` for details.
+The contents of this repository are distributed under the GPL-3 license. See
+file `LICENSE` for details.
 
-------------------------------------------------------------------------
+---
