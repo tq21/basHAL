@@ -12,6 +12,7 @@
 #' @importFrom progress progress_bar
 #' @importFrom parallel mclapply
 #' @importFrom origami make_folds
+#' @importFrom origami folds_montecarlo
 #'
 #' @export
 #'
