@@ -272,19 +272,21 @@ basHAL <- R6Class("basHAL",
     #' predict using the validation set.
     #'
     #' @todo THIS FUNCTION IS NOT WORKING AT THE MOMENT!!!
-    fit_small_glm = function(basis_set, X_train, y_train, X_valid) {
-      data <- data.frame(y = y_train, X_train)
-      glm_mod <- glm(y ~ ., data = data, family = self$family)
-      y_pred <- predict(glm_mod, newdata = data.frame(X_valid), type = "response")
+    fit_small_glm = function(X_train, y_train, X_valid) {
+      data <- data.frame(x = X_train, y = y_train)
+      glm_mod <- glm(y ~ x, data = data, family = self$family)
+      y_pred <- predict(glm_mod, newdata = data.frame(x = X_valid), type = "response")
       coefs <- coef(glm_mod)[-1]
       coefs[is.na(coefs)] <- 0
 
       # get top 10% of coefficients
-      ranked_indices <- order(abs(coefs), decreasing = TRUE)
-      top_indices <- ranked_indices[1:ceiling(0.1 * length(coefs))]
-      coefs <- coefs[top_indices]
+      #ranked_indices <- order(abs(coefs), decreasing = TRUE)
+      #top_indices <- ranked_indices[1:ceiling(0.1 * length(coefs))]
+      #coefs <- coefs[top_indices]
 
-      return(list(y_pred, coefs, top_indices))
+      basis_idx <- which(coefs != 0)
+
+      return(list(y_pred, coefs, basis_idx))
     },
 
     #' @description
@@ -413,17 +415,10 @@ basHAL <- R6Class("basHAL",
     #' @return A fitted \code{glmnet} object.
     fit_final_basis_set = function(final_basis_set) {
       basis_matrix <- make_design_matrix(final_basis_set, self$X)
-
-      fit <- NULL
-      if (self$small_fit == "glm") {
-        data <- data.frame(y = self$y, basis_matrix)
-        fit <- glm(y ~ ., data = data, family = self$family)
-      } else if (self$small_fit == "glmnet") {
-        fit <- cv.glmnet(basis_matrix, self$y, nfolds = self$V_folds, alpha = 1,
-                         standardize = FALSE,
-                         lambda.min.ratio = 1e-4,
-                         family = self$family)
-      }
+      fit <- cv.glmnet(basis_matrix, self$y, nfolds = self$V_folds, alpha = 1,
+                       standardize = FALSE,
+                       lambda.min.ratio = 1e-4,
+                       family = self$family)
 
       return(fit)
     },
@@ -506,7 +501,7 @@ basHAL <- R6Class("basHAL",
         if (verbose) {
           pb$tick()
         }
-        #print("iteration: " %+% i %+% ", best loss: " %+% self$best_loss)
+        print("iteration: " %+% i %+% ", best loss: " %+% self$best_loss)
 
         # generate random candidate basis sets
         n_random <- ifelse(is.null(self$probs),
