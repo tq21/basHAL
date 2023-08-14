@@ -126,6 +126,8 @@ basHAL <- R6Class("basHAL",
     small_fit = "glmnet",
     top_K_losses = NULL,
     avg_losses = NULL,
+    final_basis_set = NULL,
+    final_lasso_fit = NULL,
 
     initialize = function(X, y, len_candidate_basis_set, len_final_basis_set,
                           max_rows, max_degree, batch_size = 50, n_batch = 50,
@@ -133,7 +135,7 @@ basHAL <- R6Class("basHAL",
                           weight_function = "glmnet", family = "gaussian",
                           top_K_losses = NULL, best_loss = Inf, best_basis_set = NULL, best_loss_batch = NULL, best_loss_traj = NULL,
                           loss_prop = 0.5, cv_loss = FALSE, X_train = NULL, X_valid = NULL, y_train = NULL, y_valid = NULL,
-                          top_k = FALSE, small_fit = "glmnet", avg_losses = NULL) {
+                          top_k = FALSE, small_fit = "glmnet", avg_losses = NULL, final_basis_set = NULL, final_lasso_fit = NULL) {
       self$X <- X
       self$y <- y
       self$len_candidate_basis_set <- len_candidate_basis_set
@@ -167,6 +169,9 @@ basHAL <- R6Class("basHAL",
 
       self$X_train <- X
       self$y_train <- y
+
+      self$final_basis_set <- final_basis_set
+      self$final_lasso_fit <- final_lasso_fit
 
       if (!top_k) {
         # TODO: NOT WORKING AT THE MOMENT, A POTENTIAL FEATURE.
@@ -482,6 +487,21 @@ basHAL <- R6Class("basHAL",
       return(cv_loss)
     },
 
+    predict = function(newx=NULL, type, ...) {
+      # TODO: assumes users input raw data, not a HAL design matrix
+      # add feature later to check input new data type
+      # add relaxed HAL feature
+      if (is.null(newx)) {
+        # predict on training
+         return(predict(self$final_lasso_fit, s = "lambda.min", type = type, ...))
+      } else {
+        # predict on new data
+        # TODO: check newx columns
+        basis_matrix_newx <- make_design_matrix(self$final_basis_set, newx)
+        return(predict(self$final_lasso_fit, newx = basis_matrix_newx, s = "lambda.min", type = type, ...))
+      }
+    },
+
     #' @description
     #' Run the algorithm.
     #'
@@ -501,7 +521,7 @@ basHAL <- R6Class("basHAL",
         if (verbose) {
           pb$tick()
         }
-        print("iteration: " %+% i %+% ", best loss: " %+% self$best_loss)
+        #print("iteration: " %+% i %+% ", best loss: " %+% self$best_loss)
 
         # generate random candidate basis sets
         n_random <- ifelse(is.null(self$probs),
@@ -555,22 +575,21 @@ basHAL <- R6Class("basHAL",
       }
 
       # get final basis set
-      final_basis_set <- NULL
       if (self$top_k) {
-        final_basis_set <- self$get_top_K(self$len_final_basis_set)
+        self$final_basis_set <- self$get_top_K(self$len_final_basis_set)
       } else {
-        final_basis_set <- self$best_basis_set
+        self$final_basis_set <- self$best_basis_set
       }
 
       # fit CV Lasso on the sampled basis set
-      final_lasso <- self$fit_final_basis_set(final_basis_set)
+      self$final_lasso_fit <- self$fit_final_basis_set(self$final_basis_set)
 
       # plot length of dictionary
       if (plot) {
         plot(dict_length, xlab = "Batch", ylab = "Dictionary length", type = 'l')
       }
 
-      return(list(final_lasso, final_basis_set))
+      return(invisible(NULL))
     }
   )
 )
