@@ -46,8 +46,6 @@
 #'                          n_batch = 50,
 #'                          p = 0.5,
 #'                          seed = 29857,
-#'                          weight_function = "glmnet",
-#'                          top_k = TRUE,
 #'                          n_cores = 5,
 #'                          cv_loss = TRUE)
 #'
@@ -92,7 +90,6 @@
 #'   when evaluating candidate basis sets.
 #' - \code{n_cores}: Number of cpu cores to parallel across.
 #' - \code{seed}: Seed.
-#' - \code{weight_function}: Weight function, "glmnet" or "glm".
 basHAL <- R6Class("basHAL",
   public = list(
     X = NULL, # covariate matrix X
@@ -107,7 +104,6 @@ basHAL <- R6Class("basHAL",
     V_folds = 5, # V-fold cross validation
     n_cores = 1, # number of cores to parallel across
     seed = NULL, # seed
-    weight_function = "glmnet", # weight function, glmnet or glm
     basis_hash_table = NULL,
     probs_keys = NULL,
     probs = NULL,
@@ -115,30 +111,24 @@ basHAL <- R6Class("basHAL",
     best_loss = Inf,
     best_basis_set = NULL,
     best_loss_batch = NULL,
-    best_loss_traj = NULL,
     loss_prop = 0.5,
     cv_loss = FALSE,
-    X_train = NULL,
-    X_valid = NULL,
-    y_train = NULL,
-    y_valid = NULL,
-    top_k = NULL,
     small_fit = "glmnet",
     top_K_losses = NULL,
     avg_losses = NULL,
     final_basis_set = NULL,
     final_lasso_fit = NULL,
+    method = NULL,
 
     initialize = function(X, y, len_candidate_basis_set, len_final_basis_set,
                           max_rows, max_degree, batch_size = 50, n_batch = 50,
                           p = 0.5, V_folds = 5, n_cores = 1, seed = NULL,
-                          weight_function = "glmnet", family = "gaussian",
-                          top_K_losses = NULL, best_loss = Inf, best_basis_set = NULL, best_loss_batch = NULL, best_loss_traj = NULL,
-                          loss_prop = 0.5, cv_loss = FALSE, X_train = NULL, X_valid = NULL, y_train = NULL, y_valid = NULL,
-                          top_k = FALSE, small_fit = "glmnet", avg_losses = NULL, final_basis_set = NULL, final_lasso_fit = NULL) {
+                          family = "gaussian", method = NULL,
+                          top_K_losses = NULL, best_loss = Inf, best_basis_set = NULL, best_loss_batch = NULL,
+                          loss_prop = 0.5, cv_loss = FALSE,
+                          small_fit = "glmnet", avg_losses = NULL, final_basis_set = NULL, final_lasso_fit = NULL) {
       self$X <- X
       self$y <- y
-      self$len_candidate_basis_set <- len_candidate_basis_set
       self$len_final_basis_set <- len_final_basis_set
       self$max_rows <- max_rows
       self$max_degree <- max_degree
@@ -148,45 +138,30 @@ basHAL <- R6Class("basHAL",
       self$V_folds <- V_folds
       self$n_cores <- n_cores
       self$seed <- seed
-      self$weight_function <- weight_function
-
       self$basis_hash_table <- new.env(hash = TRUE)
       self$probs_keys <- NULL
       self$probs <- NULL
       self$family <- family
-
       self$top_K_losses <- top_K_losses
       self$best_loss <- best_loss
       self$best_basis_set <- best_basis_set
       self$best_loss_batch <- best_loss_batch
-      self$best_loss_traj <- best_loss_traj
-
       self$loss_prop <- loss_prop
       self$cv_loss <- cv_loss
-      self$top_k <- top_k
-      self$small_fit <- small_fit
       self$avg_losses <- avg_losses
-
-      self$X_train <- X
-      self$y_train <- y
-
       self$final_basis_set <- final_basis_set
       self$final_lasso_fit <- final_lasso_fit
+      self$method <- method
 
-      if (!top_k) {
-        # TODO: NOT WORKING AT THE MOMENT, A POTENTIAL FEATURE.
-        # make 1-fold validation set
-        strata_ids <- NULL
-        if (self$family == "binomial") {
-          strata_ids <- self$y
-        }
-        folds <- make_folds(n = nrow(self$X), V = 1, fold_fun = folds_montecarlo, strata_ids = strata_ids)
-        train_indices <- folds[[1]]$training_set
-        valid_indices <- folds[[1]]$validation_set
-        self$X_train <- as.data.frame(self$X[train_indices, ])
-        self$X_valid <- as.data.frame(self$X[valid_indices, ])
-        self$y_train <- self$y[train_indices]
-        self$y_valid <- self$y[valid_indices]
+      if (method == "univariate glm") {
+        # univariate regression method to screen basis functions
+        self$len_candidate_basis_set <- 1
+        self$small_fit <- "glm"
+      } else if (method == "k-variate glmnet") {
+        self$len_candidate_basis_set <- len_candidate_basis_set
+        self$small_fit <- "glmnet"
+      } else if (method == "k-variate glm") {
+        # TODO: NOT WORKING AT THE MOMENT
       }
     },
 
@@ -197,14 +172,14 @@ basHAL <- R6Class("basHAL",
     generate_basis_set = function() {
       # sample column indices
       col_indices <- map(seq_len(self$len_candidate_basis_set), function(i) {
-        sample(seq_len(ncol(self$X_train)),
+        sample(seq_len(ncol(self$X)),
                size = sample(seq_len(self$max_degree), size = 1),
                replace = FALSE)
       })
 
       # sample row index, get knot points
       knot_points <- map(col_indices, function(col_idx) {
-        as.numeric(self$X_train[sample(seq_len(nrow(self$X_train)), size = 1), col_idx])
+        as.numeric(self$X[sample(seq_len(nrow(self$X)), size = 1), col_idx])
       })
 
       # make candidate basis set
@@ -303,14 +278,14 @@ basHAL <- R6Class("basHAL",
     evaluate_candidate = function(basis_set) {
       # either fit on full data or sampled data
       row_indices <- NULL
-      if (self$max_rows >= nrow(self$X_train)) {
-        row_indices <- seq_len(nrow(self$X_train))
+      if (self$max_rows >= nrow(self$X)) {
+        row_indices <- seq_len(nrow(self$X))
       } else {
-        row_indices <- sample(x = 1:nrow(self$X_train), size = self$max_rows)
+        row_indices <- sample(x = 1:nrow(self$X), size = self$max_rows)
       }
 
       # make design matrix
-      basis_matrix <- make_design_matrix(basis_set, as.data.frame(self$X_train[row_indices, ]))
+      basis_matrix <- make_design_matrix(basis_set, as.data.frame(self$X[row_indices, ]))
 
       # initialize variables
       loss <- NULL # CV loss of the candidate basis set
@@ -321,7 +296,7 @@ basHAL <- R6Class("basHAL",
         # perform V-fold cross-validation to obtain CV loss
         strata_ids <- NULL
         if (self$family == "binomial") {
-          strata_ids <- self$y_train
+          strata_ids <- self$y
         }
         folds <- make_folds(n = nrow(basis_matrix), V = self$V_folds, strata_ids = strata_ids)
         fold_res <- map(folds, function(.x) {
@@ -329,15 +304,15 @@ basHAL <- R6Class("basHAL",
           valid_indices <- .x$validation_set
           X_train <- basis_matrix[train_indices, ]
           X_valid <- basis_matrix[valid_indices, ]
-          y_train <- self$y_train[row_indices][train_indices]
-          y_valid <- self$y_train[row_indices][valid_indices]
+          y_train <- self$y[row_indices][train_indices]
+          y_valid <- self$y[row_indices][valid_indices]
 
           # fit small model on training set
           fold_fit_res <- NULL
           if (self$small_fit == "glm") {
-            fold_fit_res <- self$fit_small_glm(X_train, y_train, X_valid)
+            suppressWarnings(fold_fit_res <- self$fit_small_glm(X_train, y_train, X_valid))
           } else if (self$small_fit == "glmnet") {
-            fold_fit_res <- self$fit_small_glmnet(X_train, y_train, X_valid)
+            suppressWarnings(fold_fit_res <- self$fit_small_glmnet(X_train, y_train, X_valid))
           }
 
           fold_y_pred <- fold_fit_res[[1]]
@@ -354,7 +329,7 @@ basHAL <- R6Class("basHAL",
         # perform 1-fold cross-validation to obtain CV loss
         strata_ids <- NULL
         if (self$family == "binomial") {
-          strata_ids <- self$y_train
+          strata_ids <- self$y
         }
         folds <- make_folds(n = nrow(basis_matrix), V = 1,
                             fold_fun = folds_montecarlo,
@@ -363,15 +338,15 @@ basHAL <- R6Class("basHAL",
         valid_indices <- folds[[1]]$validation_set
         X_train <- basis_matrix[train_indices, ]
         X_valid <- basis_matrix[valid_indices, ]
-        y_train <- self$y_train[row_indices][train_indices]
-        y_valid <- self$y_train[row_indices][valid_indices]
+        y_train <- self$y[row_indices][train_indices]
+        y_valid <- self$y[row_indices][valid_indices]
 
         # fit small model on training set
         fit_res <- NULL
         if (self$small_fit == "glm") {
-          fit_res <- self$fit_small_glm(X_train, y_train, X_valid)
+          suppressWarnings(fit_res <- self$fit_small_glm(X_train, y_train, X_valid))
         } else if (self$small_fit == "glmnet") {
-          fit_res <- self$fit_small_glmnet(X_train, y_train, X_valid)
+          suppressWarnings(fit_res <- self$fit_small_glmnet(X_train, y_train, X_valid))
         }
         y_pred <- fit_res[[1]]
         coefs <- fit_res[[2]]
@@ -380,10 +355,10 @@ basHAL <- R6Class("basHAL",
       }
 
       # calculate weights
-      weights <- get_weights(weight_fun = self$weight_function,
+      weights <- get_weights(weight_fun = self$method,
                              loss = loss,
-                             base_loss = get_loss(ifelse(self$family == "binomial", 0.5, mean(self$y_train)),
-                                                  self$y_train,
+                             base_loss = get_loss(ifelse(self$family == "binomial", 0.5, mean(self$y)),
+                                                  self$y,
                                                   self$family),
                              coefs = coefs,
                              num_non_zero = length(basis_idx),
@@ -429,26 +404,6 @@ basHAL <- R6Class("basHAL",
     },
 
     #' @description
-    #' Get the out-of-sample loss of a given candidate basis set.
-    #'
-    #' @todo THIS FUNCTION IS NOT USED ANYMORE. REMOVE IT.
-    #'
-    #' @param basis_set A \code{Basis} object for the candidate basis set.
-    #'
-    #' @return The out-of-sample loss of the candidate basis set.
-    get_os_loss = function(basis_set) {
-      basis_matrix <- make_design_matrix(basis_set, self$X_valid)
-      cv_fit <- cv.glmnet(basis_matrix, self$y_valid, nfolds = self$V_folds, alpha = 1,
-                          standardize = FALSE,
-                          lambda.min.ratio = 1e-4,
-                          family = self$family)
-      y_pred <- predict(cv_fit, newx = basis_matrix, s = cv_fit$lambda.min, type = "response")
-      os_loss <- get_loss(y_pred, self$y_valid, self$family)
-
-      return(os_loss)
-    },
-
-    #' @description
     #' Get the cross-validated loss of a given candidate basis set.
     #'
     #' @todo THIS FUNCTION IS FOR TESTING PURPOSES ONLY.
@@ -458,11 +413,11 @@ basHAL <- R6Class("basHAL",
     #' @return The cross-validated loss of the candidate basis set.
     get_cv_loss = function(basis_set) {
 
-      basis_matrix <- make_design_matrix(basis_set, self$X_train)
+      basis_matrix <- make_design_matrix(basis_set, self$X)
 
       strata_ids <- NULL
       if (self$family == "binomial") {
-        strata_ids <- self$y_train
+        strata_ids <- self$y
       }
       folds <- make_folds(n = nrow(basis_matrix), V = self$V_folds, strata_ids = strata_ids)
       losses <- map(folds, function(.x) {
@@ -470,8 +425,8 @@ basHAL <- R6Class("basHAL",
         valid_indices <- .x$validation_set
         X_train <- basis_matrix[train_indices, ]
         X_valid <- basis_matrix[valid_indices, ]
-        y_train <- self$y_train[train_indices]
-        y_valid <- self$y_train[valid_indices]
+        y_train <- self$y[train_indices]
+        y_valid <- self$y[valid_indices]
 
         cv_fit <- cv.glmnet(X_train, y_train, nfolds = self$V_folds, alpha = 1,
                             standardize = FALSE,
@@ -524,7 +479,7 @@ basHAL <- R6Class("basHAL",
         #print("iteration: " %+% i %+% ", best loss: " %+% self$best_loss)
 
         # generate random candidate basis sets
-        n_random <- ifelse(is.null(self$probs),
+        n_random <- ifelse(is.null(self$probs) | self$method == "univariate glm",
                            self$batch_size,
                            round(self$batch_size * self$p))
         random_basis_sets <- map(seq_len(n_random),
@@ -536,50 +491,37 @@ basHAL <- R6Class("basHAL",
                                   function(x) self$sample_basis_set())
 
         # evaluate candidate basis sets in parallel
-        eval_res <- mclapply(c(random_basis_sets, sampled_basis_sets), self$evaluate_candidate, mc.cores = self$n_cores)
+        eval_res <- mclapply(c(random_basis_sets, sampled_basis_sets),
+                             self$evaluate_candidate, mc.cores = self$n_cores)
 
-        # update basis weights
+        # compute basis weights
         walk(eval_res, function(.x) {
           self$update_weight(.x[[1]], .x[[2]])
         })
 
-        cur_top_K_basis_set <- self$get_top_K(self$len_final_basis_set)
-        self$top_K_losses <- c(self$top_K_losses, self$get_cv_loss(cur_top_K_basis_set))
+        if (self$method == "k-variate glmnet") {
+          # get basis keys and their sampling distribution
+          self$probs_keys <- names(self$basis_hash_table)
+          weights <- unlist(mget(self$probs_keys, envir = self$basis_hash_table))
 
-        cur_losses <- unlist(map(eval_res, function(.x) {
-          return(.x[[3]])
-        }))
-        cur_avg_loss <- mean(cur_losses[(n_random+1):length(cur_losses)])
-        self$avg_losses <- c(self$avg_losses, cur_avg_loss)
-
-        # evaluate out-of-sample losses, keep track of best out-of-sample loss
-        # TODO: POTENTIAL FEATURE
-        if (!self$top_k) {
-          os_losses <- mclapply(c(random_basis_sets, sampled_basis_sets), self$get_os_loss, mc.cores = self$n_cores)
-          cur_best_loss <- min(unlist(os_losses))
-          if (cur_best_loss < self$best_loss) {
-            self$best_loss <- cur_best_loss
-            self$best_basis_set <- c(random_basis_sets, sampled_basis_sets)[[which.min(unlist(os_losses))]]
-            self$best_loss_batch <- i
-          }
-          self$best_loss_traj <- c(self$best_loss_traj, self$best_loss)
+          # normalize weights to 0-1
+          weights <- (weights - min(weights)) / (max(weights) - min(weights))
+          self$probs <- weights / sum(weights)
         }
+      }
 
-        # update basis keys and their sampling distribution
+      if (self$method == "univariate glm") {
+        # if univariate glm, only need to get sampling probability after the last iteration
         self$probs_keys <- names(self$basis_hash_table)
         weights <- unlist(mget(self$probs_keys, envir = self$basis_hash_table))
 
-        # normalize weight to 0-1
+        # normalize weights to 0-1
         weights <- (weights - min(weights)) / (max(weights) - min(weights))
         self$probs <- weights / sum(weights)
       }
 
       # get final basis set
-      if (self$top_k) {
-        self$final_basis_set <- self$get_top_K(self$len_final_basis_set)
-      } else {
-        self$final_basis_set <- self$best_basis_set
-      }
+      self$final_basis_set <- self$get_top_K(self$len_final_basis_set)
 
       # fit CV Lasso on the sampled basis set
       self$final_lasso_fit <- self$fit_final_basis_set(self$final_basis_set)
