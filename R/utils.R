@@ -11,6 +11,19 @@ count_basis <- function(basis_set) {
   return(res)
 }
 
+dot <- function(basis_1, basis_2) {
+  return(sum((as.vector(basis_1) * as.vector(basis_2))))
+}
+
+orthogonalize_basis <- function(basis, dot_prods, orthos) {
+  res <- 0
+  for (j in 1:length(dot_prods)) {
+    res <- res + dot(basis, orthos[[j]]) / dot_prods[j] * orthos[[j]]
+  }
+
+  return(basis - res)
+}
+
 # basis_1 <- Basis$new(c(1,2), c(10,20))
 # basis_2 <- Basis$new(c(1,4,6), c(30,20,10))
 # basis_3 <- Basis$new(c(2,5,9,10), c(10,20,10,43))

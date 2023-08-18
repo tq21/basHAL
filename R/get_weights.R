@@ -6,7 +6,7 @@ get_weights <- function(weight_fun,
                         loss_prop = 0.5) {
   if (weight_fun == "glm") {
     return((1-loss/base_loss)/sum(abs(coefs))*abs(coefs))
-  } else if (weight_fun == "univariate glm") {
+  } else if (weight_fun == "univariate glm" | weight_fun == "univariate glm ortho") {
     return(1-loss/base_loss)
   } else if (weight_fun == "k-variate glmnet") {
     return(rep(1-loss/base_loss, length(num_non_zero)))
