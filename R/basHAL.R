@@ -155,16 +155,18 @@ basHAL <- R6Class("basHAL",
       self$final_lasso_fit <- final_lasso_fit
       self$method <- method
 
-      self$S <- list(dot_prods = rep(NULL, n_batch),
-                     orthos = vector(mode = "list", length = n_batch),
-                     bases = vector(mode = "list", length = n_batch))
+      self$S <- list(bases = vector(mode = "list", length = len_final_basis_set),
+                     bases_evaluated = vector(mode = "list", length = len_final_basis_set),
+                     dot_prods = vector(length = len_final_basis_set))
 
       if (method == "univariate glm") {
         # univariate regression method to screen basis functions
         self$len_candidate_basis_set <- 1
         self$small_fit <- "glm"
-      } else if (method == "univariate glm ortho") {
-        # univariate regression with orthogonolization
+      } else if (method == "supermass") {
+        # Super-fast Maximal Angle Subset Selection
+        # first: univariate regression to create sampling distribution
+        # second: adaptively fining maximal angle to the current subset
         self$len_candidate_basis_set <- 1
         self$small_fit <- "glm"
       } else if (method == "k-variate glmnet") {
@@ -285,7 +287,7 @@ basHAL <- R6Class("basHAL",
     #' @param basis_set A list of \code{Basis} objects to evaluate.
     #'
     #' @return A list of bases indices, calculated weights, and loss.
-    evaluate_candidate = function(basis_set) {
+    evaluate_candidate = function(basis_set, basis_evaluated=FALSE) {
       # either fit on full data or sampled data
       row_indices <- NULL
       if (self$max_rows >= nrow(self$X)) {
@@ -296,17 +298,14 @@ basHAL <- R6Class("basHAL",
 
       # make design matrix
       basis_matrix <- NULL
-      if (self$method == "univariate glm ortho") {
-        basis_matrix <- make_design_matrix(basis_set,
-                                           as.data.frame(self$X[row_indices, ]),
-                                           self$S$dot_prods, self$S$orthos)
+      if (basis_evaluated) {
+        basis_matrix <- as.matrix(basis_set)
       } else {
         basis_matrix <- make_design_matrix(basis_set,
                                            as.data.frame(self$X[row_indices, ]))
       }
 
-      if (any(is.nan(basis_matrix))) {
-        # new basis is a duplicate
+      if (all(is.nan(basis_matrix))) {
         return(list(basis_set, 0))
       }
 
@@ -491,18 +490,18 @@ basHAL <- R6Class("basHAL",
       dict_length <- vector()
 
       pb <- progress_bar$new(format = "[:bar] Batch: :current of :total, time elapsed: :elapsedfull",
-                             total = self$n_batch)
+                             total = ifelse(self$method == "supermass",
+                                            self$n_batch + self$len_final_basis_set,
+                                            self$n_batch))
 
       for (i in seq_len(self$n_batch)) {
         dict_length <- c(dict_length, length(self$basis_hash_table))
 
-        if (verbose) {
-          pb$tick()
-        }
-        #print("iteration: " %+% i %+% ", best loss: " %+% self$best_loss)
+        if (verbose) pb$tick()
+        print("iteration: " %+% i)
 
         # generate random candidate basis sets
-        n_random <- ifelse(is.null(self$probs) | self$method == "univariate glm" | self$method == "univariate glm ortho",
+        n_random <- ifelse(is.null(self$probs) | self$method == "univariate glm" | self$method == "supermass",
                            self$batch_size,
                            round(self$batch_size * self$p))
         random_basis_sets <- map(seq_len(n_random),
@@ -516,39 +515,6 @@ basHAL <- R6Class("basHAL",
         # evaluate candidate basis sets in parallel
         eval_res <- mclapply(c(random_basis_sets, sampled_basis_sets),
                              self$evaluate_candidate, mc.cores = self$n_cores)
-
-        if (self$method == "univariate glm ortho") {
-          # get all bases and their weights in the current batch
-          bases <- map(eval_res, function(.x) {
-            return(.x[[1]])
-          })
-          weights <- unlist(map(eval_res, function(.x) {
-            return(.x[[2]])
-          }))
-
-          # pick the one with largest weight
-          basis_star <- bases[[which.max(weights)]][[1]]
-          basis_star_enumerated <- enumerate_zero_order_basis(basis_star, self$X)
-
-          # orthogonalize basis star to the current set
-          if (i == 1) {
-            # automatically orthogonalized to the empty set
-            self$S$orthos[[1]] <- basis_star_enumerated
-            self$S$bases[[1]] <- basis_star
-            self$S$dot_prods[1] <- dot(self$S$orthos[[1]], self$S$orthos[[1]])
-          } else {
-            orthogonalized_basis <- orthogonalize_basis(basis_star_enumerated, self$S$dot_prods, self$S$orthos)
-            if (!any(is.nan(orthogonalized_basis))) {
-              # no duplicate basis
-              cur_idx <- length(self$S$dot_prods) + 1
-              self$S$orthos[[cur_idx]] <- orthogonalize_basis(basis_star_enumerated, self$S$dot_prods, self$S$orthos)
-              self$S$bases[[cur_idx]] <- basis_star
-
-              # store dot product, avoid redundancy
-              self$S$dot_prods[cur_idx] <- dot(self$S$orthos[[cur_idx]], self$S$orthos[[cur_idx]])
-            }
-          }
-        }
 
         # update basis weights
         walk(eval_res, function(.x) {
@@ -566,11 +532,7 @@ basHAL <- R6Class("basHAL",
         }
       }
 
-      if (self$method == "univariate glm ortho") {
-        self$final_basis_set <- self$S$bases
-      }
-
-      if (self$method == "univariate glm") {
+      if (self$method == "univariate glm" | self$method == "supermass") {
         # if univariate glm, only need to get sampling probability after the last iteration
         self$probs_keys <- names(self$basis_hash_table)
         weights <- unlist(mget(self$probs_keys, envir = self$basis_hash_table))
@@ -579,9 +541,50 @@ basHAL <- R6Class("basHAL",
         weights <- (weights - min(weights)) / (max(weights) - min(weights))
         self$probs <- weights / sum(weights)
 
-        # get final basis set
-        self$final_basis_set <- self$get_top_K(self$len_final_basis_set)
+        if (self$method == "univariate glm") {
+          # get final basis set
+          self$final_basis_set <- self$get_top_K(self$len_final_basis_set)
+        }
       }
+
+      if (self$method == "supermass") {
+        # adaptively finding the basis with maximal angle to current subset
+        # add 1st place to subset
+        pb$tick()
+        self$S$bases[[1]] <- self$get_top_K(1)[[1]]
+        self$S$bases_evaluated[[1]] <- as.vector(enumerate_zero_order_basis(self$S$bases[[1]], self$X))
+        self$S$dot_prods[1] <- dot(self$S$bases_evaluated[[1]], self$S$bases_evaluated[[1]]) # store dot products to avoid redundancy
+
+        for (i in 2:self$len_final_basis_set) {
+          if (verbose) pb$tick()
+          print("iteration: " %+% i)
+          # sample bases from posterior distribution
+          sampled_bases <- map(seq_len(self$batch_size),
+                               function(x) self$sample_basis_set())
+          sampled_bases_evaluated <- mclapply(sampled_bases, function(basis) {
+            return(enumerate_zero_order_basis(basis[[1]], self$X))
+          }, mc.cores = self$n_cores)
+
+          # project each basis onto the current subset, regress Y on each orthogonalized basis
+          sampled_bases_evals <- mclapply(sampled_bases_evaluated, function(basis_evaluated) {
+            orthoed <- ortho_basis(basis_evaluated, self$S$bases_evaluated, self$S$dot_prods, i-1)
+            return(self$evaluate_candidate(orthoed, basis_evaluated = TRUE))
+          }, mc.cores = self$n_cores)
+
+          sampled_bases_weight <- map(sampled_bases_evals, function(.x) {
+            return(.x[[2]])
+          })
+
+          # add the basis with largest weight to the subset
+          max_idx <- which.max(sampled_bases_weight)
+          self$S$bases[[i]] <- sampled_bases[[max_idx]][[1]]
+          self$S$bases_evaluated[[i]] <- sampled_bases_evaluated[[max_idx]]
+          self$S$dot_prods[i] <- dot(self$S$bases_evaluated[[i]], self$S$bases_evaluated[[i]])
+        }
+
+        self$final_basis_set <- self$S$bases
+      }
+
 
       # fit CV Lasso on the sampled basis set
       self$final_lasso_fit <- self$fit_final_basis_set(self$final_basis_set)

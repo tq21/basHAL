@@ -15,13 +15,24 @@ dot <- function(basis_1, basis_2) {
   return(sum((as.vector(basis_1) * as.vector(basis_2))))
 }
 
-orthogonalize_basis <- function(basis, dot_prods, orthos) {
-  res <- 0
-  for (j in 1:length(dot_prods)) {
-    res <- res + dot(basis, orthos[[j]]) / dot_prods[j] * orthos[[j]]
+ortho_basis <- function(basis, cur_bases, dot_prods, idx) {
+  tmp <- 0
+  for (j in 1:idx) {
+    tmp <- tmp + dot(basis, cur_bases[[j]]) / dot_prods[j] * cur_bases[[j]]
   }
 
-  return(basis - res)
+  return(basis - tmp)
+}
+
+ortho_basis_norm <- function(basis, cur_bases, dot_prods, idx) {
+  tmp <- 0
+  for (j in 1:idx) {
+    tmp <- tmp + dot(basis, cur_bases[[j]]) / dot_prods[j] * cur_bases[[j]]
+  }
+
+  orthoed <- basis - tmp
+
+  return(sqrt(dot(orthoed, orthoed)))
 }
 
 # basis_1 <- Basis$new(c(1,2), c(10,20))
