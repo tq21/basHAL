@@ -420,7 +420,7 @@ basHAL <- R6Class("basHAL",
       fit <- cv.glmnet(basis_matrix, self$y, nfolds = self$V_folds, alpha = 1,
                        standardize = FALSE,
                        lambda.min.ratio = 1e-4,
-                       family = self$family)
+                       family = self$family, nlambda = 1000)
 
       return(fit)
     },
@@ -498,7 +498,7 @@ basHAL <- R6Class("basHAL",
         dict_length <- c(dict_length, length(self$basis_hash_table))
 
         if (verbose) pb$tick()
-        print("iteration: " %+% i)
+        #print("iteration: " %+% i)
 
         # generate random candidate basis sets
         n_random <- ifelse(is.null(self$probs) | self$method == "univariate glm" | self$method == "supermass",
@@ -552,17 +552,18 @@ basHAL <- R6Class("basHAL",
         # add 1st place to subset
         pb$tick()
         self$S$bases[[1]] <- self$get_top_K(1)[[1]]
-        self$S$bases_evaluated[[1]] <- as.vector(enumerate_zero_order_basis(self$S$bases[[1]], self$X))
-        self$S$dot_prods[1] <- dot(self$S$bases_evaluated[[1]], self$S$bases_evaluated[[1]]) # store dot products to avoid redundancy
+        self$S$bases_evaluated[[1]] <- as.vector(evaluate_zero_order_basis(self$S$bases[[1]], self$X))
+        self$S$dot_prods[1] <- as.numeric( # store dot products to avoid redundancy
+          self$S$bases_evaluated[[1]]%*%self$S$bases_evaluated[[1]])
 
         for (i in 2:self$len_final_basis_set) {
           if (verbose) pb$tick()
-          print("iteration: " %+% i)
+          #print("iteration: " %+% i)
           # sample bases from posterior distribution
           sampled_bases <- map(seq_len(self$batch_size),
                                function(x) self$sample_basis_set())
           sampled_bases_evaluated <- mclapply(sampled_bases, function(basis) {
-            return(enumerate_zero_order_basis(basis[[1]], self$X))
+            return(evaluate_zero_order_basis(basis[[1]], self$X))
           }, mc.cores = self$n_cores)
 
           # project each basis onto the current subset, regress Y on each orthogonalized basis
@@ -579,12 +580,12 @@ basHAL <- R6Class("basHAL",
           max_idx <- which.max(sampled_bases_weight)
           self$S$bases[[i]] <- sampled_bases[[max_idx]][[1]]
           self$S$bases_evaluated[[i]] <- sampled_bases_evaluated[[max_idx]]
-          self$S$dot_prods[i] <- dot(self$S$bases_evaluated[[i]], self$S$bases_evaluated[[i]])
+          self$S$dot_prods[i] <- as.numeric(
+            self$S$bases_evaluated[[i]]%*%self$S$bases_evaluated[[i]])
         }
 
         self$final_basis_set <- self$S$bases
       }
-
 
       # fit CV Lasso on the sampled basis set
       self$final_lasso_fit <- self$fit_final_basis_set(self$final_basis_set)
