@@ -302,7 +302,7 @@ basHAL <- R6Class("basHAL",
         basis_matrix <- as.matrix(basis_set)
       } else {
         basis_matrix <- make_design_matrix(basis_set,
-                                           as.data.frame(self$X[row_indices, ]))
+                                           as.matrix(self$X[row_indices, ]))
       }
 
       if (all(is.nan(basis_matrix))) {

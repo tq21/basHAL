@@ -2,6 +2,7 @@ library(ggplot2)
 
 `%+%` <- function(a, b) paste0(a, b)
 
+
 #' Orthonormalize a given basis w.r.t previously selected bases
 #'
 #' @param basis A \code{Basis} object
